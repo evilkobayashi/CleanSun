@@ -8,7 +8,7 @@ Sistema embarcado para interpretação simplificada de dados fotovoltaicos no m�
 - `modbus_reader.py`: leitura dos registros Growatt via Modbus RTU.
 - `data_processor.py`: cálculo de autoconsumo, excedente, economia, PR e status.
 - `http_server.py`: servidor HTTP local (`/`, `/api/data` e SSE em `/api/events`).
-- `dashboard.html`: SPA HTML/CSS/JS offline (sem CDN).
+- `dashboard.html`: SPA HTML/CSS/JS offline (sem CDN), totalmente autocontida (<50KB), com gráfico de barras e gauge em CSS puro.
 - `simulate_growatt.py`: simulador Modbus TCP para testes em PC.
 
 ## Registros Growatt lidos
@@ -69,3 +69,6 @@ O simulador responde função Modbus `0x03` com curva solar diária (pico ao mei
 - Operação totalmente offline (LAN local).
 - Sem app móvel e sem nuvem.
 - Dashboard autocontido e leve (<50KB).
+
+
+- Dashboard otimizado para carregamento alvo <1s em rede local e legibilidade mobile (fonte base 16px).

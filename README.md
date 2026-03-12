@@ -13,14 +13,15 @@ Sistema embarcado para interpretação simplificada de dados fotovoltaicos no m�
 
 ## Registros Growatt lidos
 
-- `0x0001` status do sistema
+- `0x0001` potência instantânea (W)
 - `0x0003` tensão DC (V)
-- `0x0005` corrente DC (A)
-- `0x0006` potência saída AC (W)
-- `0x003C` geração diária (0.1 kWh)
-- `0x0055` geração total (0.1 kWh)
-- `0x007D` temperatura interna (0.1 °C)
-- `0x0100` potência instantânea total (W)
+- `0x0006` geração do dia (0.1 kWh)
+- `0x003B` geração total (0.1 kWh)
+
+
+## Leitura periódica em memória local
+
+O módulo `modbus_reader.py` implementa `GrowattModbusReader.poll_and_store_forever(interval_seconds=5)`, que lê todos os registros a cada 5 segundos e mantém um buffer circular em RAM (`memory_buffer`), sem banco de dados externo.
 
 ## Flash (ESP32/ESP8266 com MicroPython 1.21+)
 

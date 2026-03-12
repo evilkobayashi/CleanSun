@@ -23,11 +23,16 @@ Sistema embarcado para interpretação simplificada de dados fotovoltaicos no m�
 
 O módulo `modbus_reader.py` implementa `GrowattModbusReader.poll_and_store_forever(interval_seconds=5)`, que lê todos os registros a cada 5 segundos e mantém um buffer circular em RAM (`memory_buffer`), sem banco de dados externo.
 
+## Histórico em CSV circular (flash)
+
+`data_processor.py` mantém `history.csv` em formato horário com colunas `timestamp,geracao_kwh,consumo_kwh,exportado_kwh`, gravando no máximo 512KB (`history_max_bytes=524288`) com rotação circular em flash.
+
 ## API HTTP e atualização em tempo real
 
 - `GET /` → retorna `dashboard.html`
 - `GET /api/data` → JSON com dados atuais (`payload()` do processador)
 - `GET /api/events` → stream SSE (`event: update`) para atualização em tempo real sem WebSocket
+- `GET /api/history?days=7` → histórico horário dos últimos N dias
 
 ## Flash (ESP32/ESP8266 com MicroPython 1.21+)
 

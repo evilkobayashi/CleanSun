@@ -17,6 +17,22 @@ class CleanSunHTTPServer:
     async def start(self):
         self.server = await asyncio.start_server(self._handle_client, self.host, self.port)
 
+    @staticmethod
+    def _parse_query(path):
+        if "?" not in path:
+            return path, {}
+        base, raw = path.split("?", 1)
+        query = {}
+        for p in raw.split("&"):
+            if not p:
+                continue
+            if "=" in p:
+                k, v = p.split("=", 1)
+            else:
+                k, v = p, ""
+            query[k] = v
+        return base, query
+
     async def _handle_client(self, reader, writer):
         req = await reader.readline()
         if not req:
@@ -27,6 +43,7 @@ class CleanSunHTTPServer:
         parts = req_line.split(" ")
         method = parts[0] if len(parts) > 0 else "GET"
         path = parts[1] if len(parts) > 1 else "/"
+        path, query = self._parse_query(path)
 
         while True:
             header = await reader.readline()
@@ -41,6 +58,14 @@ class CleanSunHTTPServer:
             await self._serve_dashboard(writer)
         elif path == "/api/data" or path == "/api/state":
             body = json.dumps(self.processor.payload())
+            await self._send(writer, "200 OK", "application/json", body)
+        elif path == "/api/history":
+            days = query.get("days", "7")
+            try:
+                days = int(days)
+            except ValueError:
+                days = 7
+            body = json.dumps({"days": days, "rows": self.processor.history_last_days(days)})
             await self._send(writer, "200 OK", "application/json", body)
         elif path == "/api/events":
             await self._serve_sse(writer)
@@ -67,7 +92,6 @@ class CleanSunHTTPServer:
         await writer.drain()
 
         try:
-            # keep alive + atualização "quase real-time" sem websocket pesado
             while True:
                 payload = json.dumps(self.processor.payload())
                 msg = "event: update\ndata: {data}\n\n".format(data=payload)

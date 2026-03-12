@@ -1,1 +1,1 @@
-timestamp,daily_kwh,power_w,temp_c,pr,status
+timestamp,geracao_kwh,consumo_kwh,exportado_kwh

@@ -7,7 +7,7 @@ Sistema embarcado para interpretação simplificada de dados fotovoltaicos no m�
 - `main.py`: loop principal (`uasyncio`) e polling Modbus a cada 5s.
 - `modbus_reader.py`: leitura dos registros Growatt via Modbus RTU.
 - `data_processor.py`: cálculo de autoconsumo, excedente, economia, PR e status.
-- `http_server.py`: servidor HTTP local (`/` + `/api/state`).
+- `http_server.py`: servidor HTTP local (`/`, `/api/data` e SSE em `/api/events`).
 - `dashboard.html`: SPA HTML/CSS/JS offline (sem CDN).
 - `simulate_growatt.py`: simulador Modbus TCP para testes em PC.
 
@@ -22,6 +22,12 @@ Sistema embarcado para interpretação simplificada de dados fotovoltaicos no m�
 ## Leitura periódica em memória local
 
 O módulo `modbus_reader.py` implementa `GrowattModbusReader.poll_and_store_forever(interval_seconds=5)`, que lê todos os registros a cada 5 segundos e mantém um buffer circular em RAM (`memory_buffer`), sem banco de dados externo.
+
+## API HTTP e atualização em tempo real
+
+- `GET /` → retorna `dashboard.html`
+- `GET /api/data` → JSON com dados atuais (`payload()` do processador)
+- `GET /api/events` → stream SSE (`event: update`) para atualização em tempo real sem WebSocket
 
 ## Flash (ESP32/ESP8266 com MicroPython 1.21+)
 

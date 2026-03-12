@@ -1,0 +1,20 @@
+{
+  "tarifa_kwh": 0.92,
+  "potencia_sistema_kwp": 5.0,
+  "nome_instalacao": "Residencia",
+  "expected_irradiance": {
+    "6": 0.10,
+    "7": 0.20,
+    "8": 0.35,
+    "9": 0.55,
+    "10": 0.70,
+    "11": 0.85,
+    "12": 0.95,
+    "13": 0.90,
+    "14": 0.80,
+    "15": 0.60,
+    "16": 0.40,
+    "17": 0.20
+  },
+  "max_history_rows": 576
+}

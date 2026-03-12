@@ -1,0 +1,186 @@
+"""Data processing and KPI generation for CleanSun."""
+import json
+import math
+import os
+import time
+
+DEFAULT_CONFIG = {
+    "tarifa_kwh": 0.92,
+    "potencia_sistema_kwp": 5.0,
+    "nome_instalacao": "Residencia",
+    "expected_irradiance": {
+        "6": 0.10,
+        "7": 0.20,
+        "8": 0.35,
+        "9": 0.55,
+        "10": 0.70,
+        "11": 0.85,
+        "12": 0.95,
+        "13": 0.90,
+        "14": 0.80,
+        "15": 0.60,
+        "16": 0.40,
+        "17": 0.20,
+    },
+    "max_history_rows": 576,
+}
+
+
+class DataProcessor:
+    def __init__(self, config_path, history_path):
+        self.config_path = config_path
+        self.history_path = history_path
+        self.config = self._load_config()
+        self.last_snapshot = {}
+        self.last_metrics = self._blank_metrics()
+        self.fault = None
+
+    def _load_config(self):
+        if not self._exists(self.config_path):
+            self._write_json(self.config_path, DEFAULT_CONFIG)
+            return dict(DEFAULT_CONFIG)
+
+        with open(self.config_path, "r", encoding="utf-8") as f:
+            loaded = json.loads(f.read())
+
+        merged = dict(DEFAULT_CONFIG)
+        merged.update(loaded)
+        return merged
+
+    @staticmethod
+    def _exists(path):
+        try:
+            os.stat(path)
+            return True
+        except OSError:
+            return False
+
+    @staticmethod
+    def _write_json(path, data):
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(data))
+
+    @staticmethod
+    def _blank_metrics():
+        return {
+            "autoconsumo_pct": 0.0,
+            "excedente_exportado_kwh": 0.0,
+            "economia_diaria_rs": 0.0,
+            "performance_ratio": 0.0,
+            "status": "ATENCAO",
+            "status_text": "Aguardando dados do inversor.",
+            "phrases": [],
+            "hourly": {},
+        }
+
+    def register_fault(self, title, detail=""):
+        self.fault = {"title": title, "detail": detail, "ts": int(time.time())}
+        self.last_metrics["status"] = "ALERTA"
+        self.last_metrics["status_text"] = title
+
+    def ingest_snapshot(self, snapshot):
+        self.last_snapshot = snapshot
+        self.fault = None
+        metrics = self._compute_metrics(snapshot)
+        self.last_metrics = metrics
+        self._append_history(snapshot, metrics)
+
+    def _compute_metrics(self, snapshot):
+        daily_gen = max(snapshot.get("daily_gen_kwh", 0.0), 0.0)
+        power_kw = max(snapshot.get("instant_total_w", 0.0), 0.0) / 1000.0
+        consumed = min(daily_gen, daily_gen * 0.65 + power_kw * 0.05)
+
+        autoconsumo_pct = (consumed / daily_gen * 100.0) if daily_gen > 0 else 0.0
+        excedente = max(daily_gen - consumed, 0.0)
+        economia = consumed * float(self.config.get("tarifa_kwh", 0.0))
+
+        performance_ratio = self._performance_ratio(snapshot)
+        status, status_text = self._status_from_pr(performance_ratio)
+
+        return {
+            "autoconsumo_pct": round(autoconsumo_pct, 1),
+            "excedente_exportado_kwh": round(excedente, 2),
+            "economia_diaria_rs": round(economia, 2),
+            "performance_ratio": round(performance_ratio, 2),
+            "status": status,
+            "status_text": status_text,
+            "phrases": self._phrases(consumed, excedente, performance_ratio),
+            "hourly": self._hourly_curve(snapshot),
+        }
+
+    def _performance_ratio(self, snapshot):
+        now = time.localtime()
+        hour = str(now[3])
+        irr = float(self.config.get("expected_irradiance", {}).get(hour, 0.0))
+        kwp = float(self.config.get("potencia_sistema_kwp", 0.0))
+        expected_kw = kwp * irr
+        actual_kw = max(snapshot.get("instant_total_w", 0.0), 0.0) / 1000.0
+        if expected_kw <= 0.01:
+            return 1.0 if actual_kw > 0 else 0.0
+        return min(actual_kw / expected_kw, 1.4)
+
+    @staticmethod
+    def _status_from_pr(pr):
+        if pr >= 0.85:
+            return "NORMAL", "Sistema funcionando normalmente"
+        if pr >= 0.55:
+            return "ATENCAO", "Desempenho abaixo do esperado para o horario"
+        return "ALERTA", "Geracao muito abaixo do esperado"
+
+    @staticmethod
+    def _phrases(consumed, excedente, pr):
+        phrases = [
+            "Voce aproveitou {:.2f} kWh da propria geracao hoje.".format(consumed),
+            "{}% da energia ficou em autoconsumo.".format(round((consumed / (consumed + excedente + 1e-6)) * 100)),
+        ]
+        if pr < 0.55:
+            phrases.append("Sugestao: verificar sombreamento, sujeira ou alertas no inversor.")
+        elif excedente > consumed:
+            phrases.append("Ha excedente relevante; considere deslocar cargas para o periodo solar.")
+        else:
+            phrases.append("Perfil de consumo bem alinhado com a geracao solar.")
+        return phrases
+
+    def _hourly_curve(self, snapshot):
+        now = time.localtime()
+        hour = now[3]
+        base = max(snapshot.get("instant_total_w", 0.0), 0.0)
+        values = {}
+        for h in range(24):
+            delta = abs(h - 12)
+            factor = max(0.0, 1.0 - (delta / 7.0) ** 2)
+            values[str(h)] = round(base * factor, 0)
+        values[str(hour)] = round(base, 0)
+        return values
+
+    def _append_history(self, snapshot, metrics):
+        line = "{ts},{daily:.2f},{power:.0f},{temp:.1f},{pr:.2f},{status}\n".format(
+            ts=int(time.time()),
+            daily=snapshot.get("daily_gen_kwh", 0.0),
+            power=snapshot.get("instant_total_w", 0.0),
+            temp=snapshot.get("temperature_c", 0.0),
+            pr=metrics.get("performance_ratio", 0.0),
+            status=metrics.get("status", "ATENCAO"),
+        )
+        if not self._exists(self.history_path):
+            with open(self.history_path, "w", encoding="utf-8") as f:
+                f.write("timestamp,daily_kwh,power_w,temp_c,pr,status\n")
+
+        with open(self.history_path, "r", encoding="utf-8") as f:
+            rows = f.readlines()
+        rows.append(line)
+
+        max_rows = int(self.config.get("max_history_rows", 576)) + 1
+        if len(rows) > max_rows:
+            rows = [rows[0]] + rows[-(max_rows - 1):]
+
+        with open(self.history_path, "w", encoding="utf-8") as f:
+            f.write("".join(rows))
+
+    def payload(self):
+        return {
+            "config": self.config,
+            "snapshot": self.last_snapshot,
+            "metrics": self.last_metrics,
+            "fault": self.fault,
+        }

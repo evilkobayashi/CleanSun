@@ -1,26 +1,419 @@
-<!doctype html><html lang="pt-br"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CleanSun</title><style>
-:root{--ok:#18a957;--warn:#f3b11f;--bad:#df3b3b;--bg:#0e1a22;--card:#142633;--txt:#e7f2f9;--muted:#9fc0d6}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:16px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}main{padding:12px;max-width:860px;margin:auto}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.card{background:var(--card);border-radius:12px;padding:12px}.big{font-size:1.9rem;font-weight:700}.status{display:flex;gap:10px;align-items:center}.sun{width:42px;height:42px;border-radius:50%;background:#f9dd50;box-shadow:0 0 0 6px #f9dd5040;animation:spin 10s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}h2,h3{margin:.2rem 0 .35rem}small{color:var(--muted);font-size:.95rem}
-.bars{height:160px;display:grid;grid-template-columns:repeat(24,1fr);align-items:end;gap:2px;padding-top:12px}.bar{height:6%;background:#2d4759;border-radius:3px 3px 0 0;position:relative}.bar>i{position:absolute;left:0;right:0;bottom:0;background:#3ca9dd;border-radius:3px 3px 0 0}.bar>span{position:absolute;bottom:-16px;left:50%;transform:translateX(-50%);font-size:9px;color:var(--muted)}
-.wbars{height:170px;display:grid;grid-template-columns:repeat(7,1fr);align-items:end;gap:8px;padding-top:10px}.wbar{height:6%;background:#2d4759;border-radius:5px 5px 0 0;position:relative}.wbar>i{position:absolute;left:0;right:0;bottom:0;background:#58c972;border-radius:5px 5px 0 0}.wbar>span{position:absolute;bottom:-18px;left:50%;transform:translateX(-50%);font-size:11px;color:var(--muted)}
-.gwrap{display:grid;place-items:center}.gauge{--val:0;--gcol:var(--bad);width:170px;height:170px;border-radius:50%;background:conic-gradient(from 180deg,var(--gcol) calc(var(--val)*1%),#375264 0);position:relative}.gauge:before{content:"";position:absolute;inset:16px;border-radius:50%;background:var(--card)}.gauge:after{content:attr(data-val);position:absolute;inset:0;display:grid;place-items:center;font-size:1.4rem;font-weight:700}.phrases{margin:0;padding-left:18px}li{margin:6px 0}
-@media (max-width:420px){.big{font-size:1.7rem}.gauge{width:150px;height:150px}}
-</style></head><body><main>
-<section class="card status"><div class="sun"></div><div><h2 id="statusText">Carregando...</h2><small id="prText">PR --</small><br><small id="conn">Conectando...</small></div></section>
-<section class="grid"><article class="card"><div>Gerado Hoje</div><div id="kwh" class="big">0.00</div><small>kWh</small></article><article class="card"><div>Economizado Hoje</div><div id="rs" class="big">0.00</div><small>R$</small></article><article class="card"><div>Enviado à Rede</div><div id="exp" class="big">0.00</div><small>kWh</small></article></section>
-<section class="card"><h3>Geração hora a hora</h3><div id="bars" class="bars"></div></section>
-<section class="card"><h3>Histórico semanal (kWh)</h3><div id="weekBars" class="wbars"></div></section>
-<section class="card"><h3>Autoconsumo</h3><div class="gwrap"><div id="gauge" class="gauge" data-val="0.0%"></div></div></section>
-<section class="card"><h3>Frases automáticas</h3><ul id="phrases" class="phrases"></ul></section>
-</main><script>
-const c=(id)=>document.getElementById(id),ok='var(--ok)',wn='var(--warn)',bd='var(--bad)';
-const col=(s)=>s==='NORMAL'?ok:s==='ATENCAO'?wn:bd;
-function bars(h){let e=Object.values(h||{}),m=Math.max(1,...e),out='';for(let i=0;i<24;i++){let v=h?.[i]||0,p=Math.max(4,(v/m)*100);out+=`<div class='bar'><i style='height:${p}%'></i><span>${i}</span></div>`}c('bars').innerHTML=out}
-function week(rows){let days=['Dom','Seg','Ter','Qua','Qui','Sex','Sab'],agg={};for(const r of (rows||[])){const d=new Date((r.timestamp||0)*1000);const k=d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate();agg[k]=(agg[k]||{lab:days[d.getDay()],g:0});agg[k].g+=Number(r.geracao_kwh||0)};const vals=Object.values(agg).slice(-7);const m=Math.max(1,...vals.map(v=>v.g));let out='';for(let i=0;i<7;i++){const v=vals[i]||{lab:'-',g:0},p=Math.max(4,(v.g/m)*100);out+=`<div class='wbar'><i style='height:${p}%'></i><span>${v.lab}</span></div>`}c('weekBars').innerHTML=out}
-function gauge(v){let a=Math.max(0,Math.min(100,v)),g=c('gauge');g.style.setProperty('--val',a);g.style.setProperty('--gcol',a>70?'#18a957':a>45?'#f3b11f':'#df3b3b');g.dataset.val=a.toFixed(1)+'%'}
-function phrases(list){c('phrases').innerHTML=(list||[]).map(x=>`<li>${x}</li>`).join('')}
-function applyData(d){const m=d.metrics||{},s=d.snapshot||{};c('statusText').textContent=m.status_text||'--';c('statusText').style.color=col(m.status);c('prText').textContent='Performance ratio: '+((m.performance_ratio||0).toFixed(2));c('kwh').textContent=(s.daily_gen_kwh||0).toFixed(2);c('rs').textContent=(m.economia_diaria_rs||0).toFixed(2);c('exp').textContent=(m.excedente_exportado_kwh||0).toFixed(2);bars(m.hourly);gauge(m.autoconsumo_pct||0);phrases(m.phrases)}
-async function loadWeek(){try{const r=await fetch('/api/history?days=7');const d=await r.json();week(d.rows||[]);}catch(_){}}
-async function poll(){try{const r=await fetch('/api/data');applyData(await r.json());c('conn').textContent='Atualização: polling';}catch(_){c('conn').textContent='Sem conexão local'}loadWeek();setTimeout(poll,5000)}
-function sse(){if(!window.EventSource)return poll();const e=new EventSource('/api/events');e.onopen=()=>c('conn').textContent='Atualização: tempo real (SSE)';e.addEventListener('update',(v)=>{try{applyData(JSON.parse(v.data));loadWeek()}catch(_){}});e.onerror=()=>{c('conn').textContent='SSE indisponível, usando polling';e.close();poll()}}
-sse();
-</script></body></html>
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CleanSun</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0f1a20;--surface:#162028;--surface2:#1c2b35;--border:#243040;
+  --text:#e8f2f8;--muted:#7a9db5;--hint:#4a6a7e;
+  --sun:#F5A623;--sun-dim:rgba(245,166,35,0.13);
+  --green:#3B9E52;--green-dim:rgba(59,158,82,0.13);
+  --blue:#378ADD;--blue-dim:rgba(55,138,221,0.12);
+  --warn:#E8960F;--bad:#C44444;
+  --grid:rgba(255,255,255,0.05);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'DM Sans',system-ui,sans-serif;font-size:15px;line-height:1.4;min-height:100vh}
+.dash{max-width:880px;margin:0 auto;padding:20px 16px 40px}
+
+.topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px}
+.logo{display:flex;align-items:center;gap:10px}
+.logo-sun{width:34px;height:34px;background:var(--sun);border-radius:50%;display:grid;place-items:center;flex-shrink:0;animation:pulse 4s ease-in-out infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(245,166,35,.35)}50%{box-shadow:0 0 0 8px rgba(245,166,35,0)}}
+.logo-sun svg{width:18px;height:18px}
+.brand{font-size:19px;font-weight:500;letter-spacing:-.4px;line-height:1}
+.brand span{color:var(--sun)}
+.install{font-size:11px;color:var(--hint);margin-top:2px}
+.top-right{display:flex;align-items:center;gap:10px}
+.status-badge{display:flex;align-items:center;gap:7px;padding:7px 14px;border-radius:99px;border:1px solid var(--border);background:var(--surface);font-size:13px;font-weight:500}
+.dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.dot.ok{background:var(--green);box-shadow:0 0 6px var(--green)}
+.dot.warn{background:var(--warn);box-shadow:0 0 6px var(--warn)}
+.dot.bad{background:var(--bad);box-shadow:0 0 6px var(--bad)}
+.conn-label{font-size:11px;color:var(--hint)}
+
+.kpi-row{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px 18px;position:relative;overflow:hidden;transition:border-color .2s}
+.kpi:hover{border-color:var(--hint)}
+.kpi-stripe{position:absolute;top:0;left:0;width:3px;height:100%}
+.kpi label{font-size:11px;color:var(--muted);letter-spacing:.5px;text-transform:uppercase;display:block;margin-bottom:10px}
+.kpi-num{font-family:'DM Mono',monospace;font-size:30px;font-weight:500;letter-spacing:-1.5px;line-height:1}
+.kpi-unit{font-size:12px;color:var(--muted);margin-top:4px}
+.kpi-sub{font-size:11px;color:var(--hint);margin-top:8px}
+
+.card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:18px 20px;margin-bottom:14px}
+.card-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+.card h3{font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:16px}
+
+.flow{display:flex;align-items:center;justify-content:center;gap:0;padding:6px 0 10px}
+.fnode{display:flex;flex-direction:column;align-items:center;gap:7px;min-width:90px}
+.ficon{width:54px;height:54px;border-radius:50%;border:1.5px solid var(--border);display:grid;place-items:center}
+.ficon.f-sun{border-color:var(--sun);background:var(--sun-dim)}
+.ficon.f-green{border-color:var(--green);background:var(--green-dim)}
+.ficon.f-blue{border-color:var(--blue);background:var(--blue-dim)}
+.fval{font-family:'DM Mono',monospace;font-size:14px;font-weight:500}
+.flabel{font-size:11px;color:var(--muted)}
+.farrow{display:flex;flex-direction:column;align-items:center;gap:5px;padding:0 4px;margin-bottom:22px}
+.fline{height:2px;width:44px;border-radius:1px;background:var(--border);position:relative;overflow:visible}
+.fline.on{background:var(--sun)}
+.fline.on-blue{background:var(--blue)}
+.fline.on::after{content:'';position:absolute;right:-6px;top:-4px;border:5px solid transparent;border-left-color:var(--sun)}
+.fline.on-blue::after{content:'';position:absolute;right:-6px;top:-4px;border:5px solid transparent;border-left-color:var(--blue)}
+.farrow-lbl{font-size:10px;color:var(--hint)}
+
+.gauge-wrap{display:flex;align-items:center;justify-content:center;gap:24px;padding:6px 0}
+.gauge-legend{display:flex;flex-direction:column;gap:9px}
+.gl{display:flex;align-items:center;gap:8px;font-size:13px}
+.gl-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.gl-sep{margin-top:4px;padding-top:10px;border-top:1px solid var(--border);font-size:12px;color:var(--muted);line-height:1.7}
+
+.pr-big{font-family:'DM Mono',monospace;font-size:36px;font-weight:500;letter-spacing:-2px;margin:8px 0 4px}
+.pr-sub{font-size:12px;color:var(--muted);margin-bottom:14px}
+.pr-track{height:7px;background:var(--surface2);border-radius:4px;overflow:visible;margin-bottom:6px;position:relative}
+.pr-fill{height:100%;border-radius:4px;transition:width .8s ease;overflow:hidden}
+.pr-mark{position:absolute;top:-2px;height:11px;width:2px;background:var(--green);border-radius:1px;left:61%}
+.pr-ticks{display:flex;justify-content:space-between;font-size:10px;color:var(--hint)}
+.pr-info{margin-top:12px;font-size:12px;color:var(--muted);background:var(--surface2);border-radius:8px;padding:10px 12px;line-height:1.7}
+
+.chart-wrap{position:relative}
+.chart-legend{display:flex;gap:16px;margin-top:10px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+.cl-dot{width:10px;height:10px;border-radius:2px;display:inline-block;margin-right:4px;vertical-align:middle}
+
+.phrases{list-style:none;display:flex;flex-direction:column;gap:8px}
+.ph{display:flex;align-items:flex-start;gap:11px;padding:11px 14px;border-radius:10px;background:var(--surface2);font-size:14px;line-height:1.55}
+.ph-ic{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;flex-shrink:0;margin-top:1px;font-size:11px;font-weight:700}
+.ok-ic{background:rgba(59,158,82,.2);color:var(--green)}
+.warn-ic{background:rgba(232,150,15,.18);color:var(--warn)}
+.info-ic{background:rgba(55,138,221,.18);color:var(--blue)}
+
+@media(max-width:600px){
+  .kpi-row,.card-row{grid-template-columns:1fr}
+  .kpi-num{font-size:24px}
+  .pr-big{font-size:28px}
+  .ficon{width:46px;height:46px}
+  .fline{width:30px}
+}
+</style>
+</head>
+<body><div class="dash">
+
+<div class="topbar">
+  <div class="logo">
+    <div class="logo-sun">
+      <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round">
+        <circle cx="12" cy="12" r="4"/>
+        <line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/>
+        <line x1="4.22" y1="4.22" x2="6.34" y2="6.34"/><line x1="17.66" y1="17.66" x2="19.78" y2="19.78"/>
+        <line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/>
+        <line x1="4.22" y1="19.78" x2="6.34" y2="17.66"/><line x1="17.66" y1="6.34" x2="19.78" y2="4.22"/>
+      </svg>
+    </div>
+    <div>
+      <div class="brand">Clean<span>Sun</span></div>
+      <div class="install" id="installName">Growatt · Residência</div>
+    </div>
+  </div>
+  <div class="top-right">
+    <div class="status-badge">
+      <div class="dot ok" id="statusDot"></div>
+      <span id="statusText">Carregando...</span>
+    </div>
+    <div class="conn-label" id="connLabel">conectando...</div>
+  </div>
+</div>
+
+<div class="kpi-row">
+  <div class="kpi">
+    <div class="kpi-stripe" style="background:var(--sun)"></div>
+    <label>Gerado hoje</label>
+    <div class="kpi-num" id="kpiGen">—</div>
+    <div class="kpi-unit">kWh</div>
+    <div class="kpi-sub" id="kpiGenSub">—</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-stripe" style="background:var(--green)"></div>
+    <label>Economizado hoje</label>
+    <div class="kpi-num" id="kpiEco">—</div>
+    <div class="kpi-unit">R$</div>
+    <div class="kpi-sub">autoconsumo + créditos</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-stripe" style="background:var(--blue)"></div>
+    <label>Enviado à rede</label>
+    <div class="kpi-num" id="kpiExp">—</div>
+    <div class="kpi-unit">kWh como crédito</div>
+    <div class="kpi-sub" id="kpiExpPct">—</div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Fluxo de energia agora</h3>
+  <div class="flow">
+    <div class="fnode">
+      <div class="ficon f-sun">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#854F0B" stroke-width="2" stroke-linecap="round">
+          <circle cx="12" cy="12" r="4"/>
+          <line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/>
+          <line x1="4.22" y1="4.22" x2="6.34" y2="6.34"/><line x1="17.66" y1="17.66" x2="19.78" y2="19.78"/>
+          <line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/>
+        </svg>
+      </div>
+      <div class="fval" id="flowPV">0.00 kW</div>
+      <div class="flabel">Painéis</div>
+    </div>
+    <div class="farrow">
+      <div class="fline on" id="arrowPV"></div>
+      <div class="farrow-lbl">gera</div>
+    </div>
+    <div class="fnode">
+      <div class="ficon f-green">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#27500A" stroke-width="2" stroke-linecap="round">
+          <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+          <polyline points="9 22 9 12 15 12 15 22"/>
+        </svg>
+      </div>
+      <div class="fval" id="flowHome">0.00 kW</div>
+      <div class="flabel">Casa</div>
+    </div>
+    <div class="farrow">
+      <div class="fline" id="arrowGrid"></div>
+      <div class="farrow-lbl">exporta</div>
+    </div>
+    <div class="fnode">
+      <div class="ficon f-blue">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#0C447C" stroke-width="2" stroke-linecap="round">
+          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+        </svg>
+      </div>
+      <div class="fval" id="flowGrid">0.00 kW</div>
+      <div class="flabel">Rede</div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Geração hora a hora (kW)</h3>
+  <div class="chart-wrap" style="height:190px"><canvas id="chartHour"></canvas></div>
+  <div class="chart-legend">
+    <span><span class="cl-dot" style="background:#F5A623"></span>Geração</span>
+    <span><span class="cl-dot" style="background:#378ADD"></span>Consumo estimado</span>
+  </div>
+</div>
+
+<div class="card-row">
+  <div class="card" style="margin-bottom:0">
+    <h3>Autoconsumo</h3>
+    <div class="gauge-wrap">
+      <svg width="130" height="130" viewBox="0 0 130 130">
+        <circle cx="65" cy="65" r="50" fill="none" stroke="#1c2b35" stroke-width="13"/>
+        <circle id="gaugeArc" cx="65" cy="65" r="50" fill="none" stroke="#F5A623"
+          stroke-width="13" stroke-dasharray="0 314" stroke-linecap="round"
+          transform="rotate(-90 65 65)" style="transition:stroke-dasharray .8s ease"/>
+        <text x="65" y="60" text-anchor="middle" font-size="22" font-weight="500"
+          font-family="DM Mono,monospace" fill="#e8f2f8" id="gaugeText">0%</text>
+        <text x="65" y="78" text-anchor="middle" font-size="11"
+          fill="#7a9db5" font-family="DM Sans,sans-serif">autoconsumo</text>
+      </svg>
+      <div class="gauge-legend">
+        <div class="gl"><div class="gl-dot" style="background:#F5A623"></div><span id="glSun">Própria: 0%</span></div>
+        <div class="gl"><div class="gl-dot" style="background:#378ADD"></div><span id="glGrid">Rede: 100%</span></div>
+        <div class="gl-sep" id="glDetail">—</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:0">
+    <h3>Performance ratio</h3>
+    <div class="pr-big" id="prVal">—</div>
+    <div class="pr-sub">de 1.0 esperado</div>
+    <div class="pr-track">
+      <div class="pr-fill" id="prFill" style="width:0%;background:var(--bad)"></div>
+      <div class="pr-mark"></div>
+    </div>
+    <div class="pr-ticks"><span>0</span><span style="color:var(--green)">0.85 normal</span><span>1.4</span></div>
+    <div class="pr-info" id="prInfo">Aguardando dados...</div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:14px">
+  <h3>Histórico semanal (kWh)</h3>
+  <div class="chart-wrap" style="height:170px"><canvas id="chartWeek"></canvas></div>
+  <div class="chart-legend" style="margin-top:10px">
+    <span><span class="cl-dot" style="background:#F5A623"></span>Geração</span>
+    <span><span class="cl-dot" style="background:rgba(55,138,221,0.8)"></span>Consumo</span>
+    <span><span class="cl-dot" style="background:rgba(59,158,82,0.8)"></span>Exportado</span>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Frases automáticas</h3>
+  <ul class="phrases" id="phrases">
+    <li class="ph"><div class="ph-ic info-ic">i</div><span>Aguardando dados do inversor...</span></li>
+  </ul>
+</div>
+
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const fmt2=n=>Number(n||0).toFixed(2);
+const GRID='rgba(255,255,255,0.05)',TICK='#4a6a7e';
+Chart.defaults.color=TICK;Chart.defaults.borderColor=GRID;
+
+const hourLabels=Array.from({length:24},(_,i)=>i+'h');
+const hourGen=new Array(24).fill(0);
+const hourCons=new Array(24).fill(0);
+
+const chartHour=new Chart($('chartHour'),{
+  type:'line',
+  data:{labels:hourLabels,datasets:[
+    {label:'Geração',data:hourGen,borderColor:'#F5A623',backgroundColor:'rgba(245,166,35,0.10)',fill:true,tension:0.4,pointRadius:0,borderWidth:2},
+    {label:'Consumo',data:hourCons,borderColor:'#378ADD',backgroundColor:'rgba(55,138,221,0.07)',fill:true,tension:0.4,pointRadius:0,borderWidth:1.5,borderDash:[5,4]}
+  ]},
+  options:{responsive:true,maintainAspectRatio:false,
+    plugins:{legend:{display:false},tooltip:{mode:'index',intersect:false,callbacks:{label:c=>c.dataset.label+': '+c.parsed.y.toFixed(2)+' kW'}}},
+    scales:{
+      x:{grid:{color:GRID},ticks:{color:TICK,font:{size:10},maxTicksLimit:12,autoSkip:true}},
+      y:{grid:{color:GRID},ticks:{color:TICK,font:{size:10},callback:v=>v.toFixed(1)},beginAtZero:true}
+    }}
+});
+
+const days=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+const chartWeek=new Chart($('chartWeek'),{
+  type:'bar',
+  data:{labels:[],datasets:[
+    {label:'Geração',  data:[],backgroundColor:'rgba(245,166,35,0.85)',borderRadius:4},
+    {label:'Consumo',  data:[],backgroundColor:'rgba(55,138,221,0.70)', borderRadius:4},
+    {label:'Exportado',data:[],backgroundColor:'rgba(59,158,82,0.70)',  borderRadius:4}
+  ]},
+  options:{responsive:true,maintainAspectRatio:false,
+    plugins:{legend:{display:false}},
+    scales:{
+      x:{grid:{display:false},ticks:{color:TICK,font:{size:11}}},
+      y:{grid:{color:GRID},ticks:{color:TICK,font:{size:10},callback:v=>v.toFixed(1)},beginAtZero:true}
+    }}
+});
+
+function setGauge(pct){
+  const p=Math.max(0,Math.min(100,pct));
+  const circ=2*Math.PI*50;
+  $('gaugeArc').setAttribute('stroke-dasharray',(p/100*circ).toFixed(1)+' '+circ.toFixed(1));
+  $('gaugeArc').setAttribute('stroke',p>70?'#3B9E52':p>45?'#F5A623':'#C44444');
+  $('gaugeText').textContent=p.toFixed(1)+'%';
+}
+
+function setPR(pr,snapshot){
+  const v=Number(pr||0);
+  const pct=Math.min(v/1.4*100,100);
+  $('prFill').style.width=pct.toFixed(1)+'%';
+  $('prFill').style.background=v>=0.85?'#3B9E52':v>=0.55?'#F5A623':'#C44444';
+  $('prVal').textContent=v.toFixed(2);
+  const pw=(Number(snapshot.instant_total_w||0)/1000).toFixed(2);
+  const estado=v>=0.85?'dentro do esperado':v>=0.55?'abaixo do esperado':'muito abaixo do esperado';
+  $('prInfo').innerHTML='Potência real: '+pw+' kW &nbsp;·&nbsp; '+estado;
+}
+
+function setStatus(status,text){
+  $('statusDot').className='dot '+(status==='NORMAL'?'ok':status==='ATENCAO'?'warn':'bad');
+  $('statusText').textContent=text||status;
+}
+
+function renderPhrases(list){
+  if(!list||!list.length)return;
+  $('phrases').innerHTML=list.map(txt=>{
+    const isWarn=/(aten|verifi|abaixo)/i.test(txt);
+    const isInfo=/(enviado|crédito|rede)/i.test(txt);
+    const cls=isWarn?'warn-ic':isInfo?'info-ic':'ok-ic';
+    const ic=isWarn?'!':isInfo?'i':'✓';
+    return'<li class="ph"><div class="ph-ic '+cls+'">'+ic+'</div><span>'+txt+'</span></li>';
+  }).join('');
+}
+
+function updateFlow(s,m){
+  const pv=Number(s.instant_total_w||0)/1000;
+  const exp=Number(m.excedente_exportado_kwh||0);
+  const exportKw=pv>0?Math.min(exp/(8*0.1+1e-9),pv):0;
+  const homeKw=Math.max(pv-exportKw,0);
+  $('flowPV').textContent=pv.toFixed(2)+' kW';
+  $('flowHome').textContent=homeKw.toFixed(2)+' kW';
+  $('flowGrid').textContent=exportKw.toFixed(2)+' kW';
+  $('arrowPV').className='fline'+(pv>0.01?' on':'');
+  $('arrowGrid').className='fline'+(exportKw>0.01?' on-blue':'');
+}
+
+function updateHourChart(hourly){
+  if(!hourly)return;
+  for(let i=0;i<24;i++){
+    const v=Number(hourly[String(i)]||hourly[i]||0);
+    hourGen[i]=parseFloat((v/1000).toFixed(3));
+    hourCons[i]=parseFloat((0.55+0.45*Math.sin((i-5)/24*Math.PI*2+0.4)).toFixed(3));
+  }
+  chartHour.update('none');
+}
+
+function updateWeekChart(rows){
+  if(!rows||!rows.length)return;
+  const agg={};
+  rows.forEach(r=>{
+    const d=new Date((r.timestamp||0)*1000);
+    const k=d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate();
+    if(!agg[k])agg[k]={lab:days[d.getDay()],g:0,c:0,e:0};
+    agg[k].g+=Number(r.geracao_kwh||0);
+    agg[k].c+=Number(r.consumo_kwh||0);
+    agg[k].e+=Number(r.exportado_kwh||0);
+  });
+  const vals=Object.values(agg).slice(-7);
+  chartWeek.data.labels=vals.map(v=>v.lab);
+  chartWeek.data.datasets[0].data=vals.map(v=>parseFloat(v.g.toFixed(2)));
+  chartWeek.data.datasets[1].data=vals.map(v=>parseFloat(v.c.toFixed(2)));
+  chartWeek.data.datasets[2].data=vals.map(v=>parseFloat(v.e.toFixed(2)));
+  chartWeek.update('none');
+}
+
+function applyData(d){
+  const m=d.metrics||{},s=d.snapshot||{},cfg=d.config||{};
+  setStatus(m.status,m.status_text);
+  if(cfg.nome_instalacao)$('installName').textContent='Growatt · '+cfg.nome_instalacao;
+  $('kpiGen').textContent=fmt2(s.daily_gen_kwh);
+  $('kpiEco').textContent=fmt2(m.economia_diaria_rs);
+  $('kpiExp').textContent=fmt2(m.excedente_exportado_kwh);
+  const gen=Number(s.daily_gen_kwh||0);
+  const exp=Number(m.excedente_exportado_kwh||0);
+  $('kpiGenSub').textContent=gen>0?'Potência agora: '+((s.instant_total_w||0)/1000).toFixed(2)+' kW':'Sem geração no momento';
+  $('kpiExpPct').textContent=gen>0?(exp/gen*100).toFixed(1)+'% do total gerado':'—';
+  updateFlow(s,m);
+  setGauge(m.autoconsumo_pct||0);
+  $('glSun').textContent='Própria: '+(m.autoconsumo_pct||0).toFixed(1)+'%';
+  $('glGrid').textContent='Rede: '+(100-(m.autoconsumo_pct||0)).toFixed(1)+'%';
+  $('glDetail').innerHTML=(m.consumo_kwh||0).toFixed(2)+' kWh da<br>própria geração';
+  setPR(m.performance_ratio,s);
+  updateHourChart(m.hourly);
+  renderPhrases(m.phrases);
+}
+
+async function loadHistory(){
+  try{const r=await fetch('/api/history?days=7');const d=await r.json();updateWeekChart(d.rows||[]);}catch(_){}
+}
+
+async function poll(){
+  try{
+    const r=await fetch('/api/data');
+    applyData(await r.json());
+    $('connLabel').textContent='polling · '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  }catch(_){$('connLabel').textContent='sem conexão local'}
+  loadHistory();
+  setTimeout(poll,5000);
+}
+
+function connect(){
+  if(!window.EventSource){poll();return}
+  const es=new EventSource('/api/events');
+  es.onopen=()=>$('connLabel').textContent='tempo real (SSE)';
+  es.addEventListener('update',ev=>{
+    try{applyData(JSON.parse(ev.data));loadHistory();}catch(_){}
+    $('connLabel').textContent='SSE · '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  });
+  es.onerror=()=>{es.close();$('connLabel').textContent='SSE falhou, polling ativo';poll()};
+}
+connect();
+</script>
+</body></html>

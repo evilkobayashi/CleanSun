@@ -1,14 +1,12 @@
-"""Módulo de leitura Modbus para inversores Growatt e fallback local rico."""
+"""Módulo de leitura Modbus para inversores Growatt e fallback técnico rico."""
+import importlib
 import importlib.util
 import math
 import random
 import time
 
 _MINIMALMODBUS_SPEC = importlib.util.find_spec("minimalmodbus")
-if _MINIMALMODBUS_SPEC is not None:
-    minimalmodbus = importlib.import_module("minimalmodbus")
-else:
-    minimalmodbus = None
+minimalmodbus = importlib.import_module("minimalmodbus") if _MINIMALMODBUS_SPEC is not None else None
 
 REGISTER_MAP = {
     "potencia_instantanea_w": 0x0001,
@@ -19,31 +17,61 @@ REGISTER_MAP = {
 
 
 class _FallbackInstrument:
-    """Gera dados coerentes de geração/consumo para uso local sem hardware."""
+    """Simula operação técnica de um inversor fotovoltaico residencial."""
 
-    WEATHER_GAIN = {
-        "céu claro": 1.0,
-        "parcialmente nublado": 0.72,
-        "nublado": 0.48,
-    }
+    WEATHER_GAIN = {"céu claro": 1.0, "parcialmente nublado": 0.76, "nublado": 0.52}
+    STATUS_MAP = {0: "Standby", 1: "Gerando", 2: "Falha", 3: "Desconectado"}
 
-    def __init__(self, weather="parcialmente nublado", kwp=5.0):
+    def __init__(self, weather="parcialmente nublado", kwp=5.0, scenario="normal"):
         self.weather = weather
         self.kwp = kwp
+        self.scenario = scenario
         self.daily_kwh = 0.0
-        self.total_kwh = 1842.3
+        self.total_kwh = 18452.7
+        self.peak_power_kw = 0.0
         self._last_tick = time.time()
         self._cache = {}
+        self._start_generation_ts = None
+        self._end_generation_ts = None
 
-    def _sun_curve(self, hour_float):
+    @staticmethod
+    def _sun_curve(hour_float):
         return max(0.0, math.sin((hour_float - 6.0) / 12.0 * math.pi))
 
-    def _house_load(self, hour_float):
-        morning = 0.35 if 6 <= hour_float <= 8.5 else 0.0
-        lunch = 0.25 if 11.5 <= hour_float <= 13.5 else 0.0
-        evening = 1.1 if 18 <= hour_float <= 22.5 else 0.0
-        base = 0.38 + morning + lunch + evening
-        return max(0.18, base + random.uniform(-0.08, 0.12))
+    @staticmethod
+    def _house_load(hour_float):
+        base = 0.32 if hour_float < 5 else 0.45
+        if 6 <= hour_float <= 8.5:
+            base += 0.50
+        elif 12 <= hour_float <= 13.5:
+            base += 0.22
+        elif 18 <= hour_float <= 22.5:
+            base += 1.20
+        return max(0.18, base + random.uniform(-0.08, 0.16))
+
+    def _pick_status(self, generation_kw, grid_available):
+        if self.scenario == "falha_inversor":
+            return 2
+        if not grid_available:
+            return 3 if generation_kw > 0 else 0
+        return 1 if generation_kw > 0.05 else 0
+
+    def _scenario_adjustments(self, sun, generation_kw, temp_c, grid_voltage, grid_freq):
+        if self.scenario == "sombreamento":
+            generation_kw *= 0.62
+        elif self.scenario == "sobretensao":
+            grid_voltage = 252 + random.uniform(1, 6)
+        elif self.scenario == "subtensao":
+            grid_voltage = 188 + random.uniform(-4, 4)
+        elif self.scenario == "temperatura_alta":
+            temp_c += 18
+            generation_kw *= 0.94
+        elif self.scenario == "rede_indisponivel":
+            grid_voltage = 0.0
+            grid_freq = 0.0
+        elif self.scenario == "falha_comunicacao":
+            temp_c += 0.0
+        return generation_kw, temp_c, grid_voltage, grid_freq
 
     def _tick(self):
         now = time.time()
@@ -52,27 +80,118 @@ class _FallbackInstrument:
         lt = time.localtime(now)
         hour_float = lt.tm_hour + lt.tm_min / 60.0
         sun = self._sun_curve(hour_float)
-        weather_gain = self.WEATHER_GAIN.get(self.weather, 0.72)
-        pv_kw = max(0.0, self.kwp * sun * (weather_gain + random.uniform(-0.05, 0.05)))
-        load_kw = self._house_load(hour_float)
-        export_kw = max(0.0, pv_kw - load_kw)
-        import_kw = max(0.0, load_kw - pv_kw)
-        self.daily_kwh += pv_kw * delta_h
-        self.total_kwh += pv_kw * delta_h
+        weather_gain = self.WEATHER_GAIN.get(self.weather, 0.76)
+        irradiance = int(1000 * sun * weather_gain)
         expected_kw = self.kwp * sun
-        dc_v = 160 + 260 * sun
+        generation_kw = max(0.0, expected_kw * weather_gain * (1 + random.uniform(-0.04, 0.04)))
+        load_kw = self._house_load(hour_float)
+        temp_c = 26 + 15 * sun + random.uniform(-0.8, 1.2)
+        grid_voltage = 220 + random.uniform(-2.5, 2.5)
+        grid_freq = 60 + random.uniform(-0.08, 0.08)
+
+        generation_kw, temp_c, grid_voltage, grid_freq = self._scenario_adjustments(sun, generation_kw, temp_c, grid_voltage, grid_freq)
+        grid_available = self.scenario != "rede_indisponivel"
+        if self.scenario == "falha_inversor":
+            generation_kw = 0.0
+
+        mppt1_v = max(0.0, 180 + 220 * sun + random.uniform(-4, 4))
+        mppt2_v = max(0.0, 176 + 214 * sun + random.uniform(-4, 4))
+        split = 0.52 + random.uniform(-0.05, 0.05)
+        mppt1_kw = generation_kw * split
+        mppt2_kw = max(0.0, generation_kw - mppt1_kw)
+        if self.scenario == "sombreamento":
+            mppt2_kw *= 0.55
+        mppt1_a = (mppt1_kw * 1000 / max(mppt1_v, 1)) if mppt1_v else 0.0
+        mppt2_a = (mppt2_kw * 1000 / max(mppt2_v, 1)) if mppt2_v else 0.0
+        dc_kw = mppt1_kw + mppt2_kw
+
+        efficiency = 95.2 + 1.4 * sun + random.uniform(-0.5, 0.4)
+        if self.scenario == "temperatura_alta":
+            efficiency -= 3.2
+        efficiency = max(88.0, min(efficiency, 98.4))
+        ac_kw = dc_kw * efficiency / 100.0 if grid_available else 0.0
+        ac_current = (ac_kw * 1000 / max(grid_voltage, 1)) if grid_voltage else 0.0
+        export_kw = max(0.0, ac_kw - load_kw)
+        import_kw = max(0.0, load_kw - ac_kw)
+        power_factor = max(0.88, min(0.995, 0.97 + random.uniform(-0.03, 0.01)))
+        apparent_kw = ac_kw / max(power_factor, 0.01)
+        grid_current = ((import_kw if import_kw > 0 else export_kw) * 1000 / max(grid_voltage, 1)) if grid_voltage else 0.0
+        active_kw = ac_kw
+        status_code = self._pick_status(ac_kw, grid_available)
+        inverter_status = self.STATUS_MAP[status_code]
+        communication_status = "Offline" if self.scenario == "falha_comunicacao" else "Online"
+        grid_status = "Indisponível" if not grid_available else ("Alarme" if grid_voltage < 195 or grid_voltage > 245 else "Normal")
+
+        if ac_kw > 0.05 and self._start_generation_ts is None:
+            self._start_generation_ts = int(now)
+        if ac_kw > 0.05:
+            self._end_generation_ts = int(now)
+        self.daily_kwh += ac_kw * delta_h
+        self.total_kwh += ac_kw * delta_h
+        self.peak_power_kw = max(self.peak_power_kw, ac_kw)
+        generation_time_h = 0.0
+        if self._start_generation_ts and self._end_generation_ts:
+            generation_time_h = max(0.0, (self._end_generation_ts - self._start_generation_ts) / 3600.0)
+
         self._cache = {
-            "potencia_instantanea_w": int(pv_kw * 1000),
-            "tensao_dc_v": int(dc_v),
+            "potencia_instantanea_w": int(ac_kw * 1000),
+            "tensao_dc_v": round((mppt1_v + mppt2_v) / 2.0, 1),
             "geracao_dia_kwh": round(self.daily_kwh, 3),
             "geracao_total_kwh": round(self.total_kwh, 1),
+            "expected_generation_w": int(expected_kw * 1000),
             "load_power_w": int(load_kw * 1000),
             "import_power_w": int(import_kw * 1000),
             "export_power_w": int(export_kw * 1000),
-            "expected_generation_w": int(expected_kw * 1000),
+            "temperature_c": round(temp_c, 1),
             "weather_label": self.weather,
-            "temperature_c": round(24 + 13 * sun + random.uniform(-1.2, 1.2), 1),
-            "status_code": 1,
+            "status_code": status_code,
+            "inverter_status": inverter_status,
+            "communication_status": communication_status,
+            "grid_status": grid_status,
+            "irradiance_wm2": irradiance,
+            "dc_power_w": int(dc_kw * 1000),
+            "ac_power_w": int(ac_kw * 1000),
+            "dc_input": {
+                "mppt1_voltage_v": round(mppt1_v, 1),
+                "mppt1_current_a": round(mppt1_a, 2),
+                "mppt1_power_kw": round(mppt1_kw, 2),
+                "mppt2_voltage_v": round(mppt2_v, 1),
+                "mppt2_current_a": round(mppt2_a, 2),
+                "mppt2_power_kw": round(mppt2_kw, 2),
+                "dc_power_kw": round(dc_kw, 2),
+            },
+            "ac_output": {
+                "voltage_v": round(grid_voltage, 1),
+                "current_a": round(ac_current, 2),
+                "power_kw": round(ac_kw, 2),
+                "frequency_hz": round(grid_freq, 2),
+                "power_factor": round(power_factor, 3),
+            },
+            "grid": {
+                "grid_voltage_v": round(grid_voltage, 1),
+                "grid_current_a": round(grid_current, 2),
+                "grid_status": grid_status,
+                "frequency_hz": round(grid_freq, 2),
+                "active_power_kw": round(active_kw, 2),
+                "apparent_power_kva": round(apparent_kw, 2),
+            },
+            "inverter": {
+                "temperature_c": round(temp_c, 1),
+                "efficiency_percent": round(efficiency, 2),
+                "status": inverter_status,
+                "communication_status": communication_status,
+                "operational_state": inverter_status,
+            },
+            "energy": {
+                "today_kwh": round(self.daily_kwh, 2),
+                "total_kwh": round(self.total_kwh, 1),
+                "import_kwh": round(import_kw * 0.083, 3),
+                "export_kwh": round(export_kw * 0.083, 3),
+                "peak_power_kw": round(self.peak_power_kw, 2),
+                "generation_start_time": time.strftime("%H:%M", time.localtime(self._start_generation_ts)) if self._start_generation_ts else "--:--",
+                "generation_end_time": time.strftime("%H:%M", time.localtime(self._end_generation_ts)) if self._end_generation_ts else "--:--",
+                "generation_duration_h": round(generation_time_h, 2),
+            },
         }
 
     def read_register(self, register, number_of_decimals=0, signed=False):
@@ -80,7 +199,7 @@ class _FallbackInstrument:
         self._tick()
         mapping = {
             0x0001: self._cache["potencia_instantanea_w"],
-            0x0003: self._cache["tensao_dc_v"],
+            0x0003: int(self._cache["tensao_dc_v"]),
             0x0006: int(self._cache["geracao_dia_kwh"] * 10),
             0x003B: int(self._cache["geracao_total_kwh"] * 10),
         }
@@ -91,24 +210,12 @@ class _FallbackInstrument:
 
 
 class GrowattModbusReader:
-    """Leitor Modbus RTU com fallback local para simulação."""
+    """Leitor Modbus RTU com fallback local para simulação técnica."""
 
-    def __init__(
-        self,
-        port="COM3",
-        slave_id=1,
-        baudrate=9600,
-        bytesize=8,
-        parity="N",
-        stopbits=1,
-        timeout=0.4,
-        instrument=None,
-        memory_size=1024,
-    ):
+    def __init__(self, port="COM3", slave_id=1, baudrate=9600, bytesize=8, parity="N", stopbits=1, timeout=0.4, instrument=None, memory_size=1024):
         self.memory_size = memory_size
         self.memory_buffer = []
         self.last_payload = {}
-
         if instrument is not None:
             self.instrument = instrument
         elif minimalmodbus is None:
@@ -125,25 +232,34 @@ class GrowattModbusReader:
 
     @staticmethod
     def _scale(register, raw_value):
-        if register in (0x0006, 0x003B):
-            return raw_value / 10.0
-        return float(raw_value)
+        return raw_value / 10.0 if register in (0x0006, 0x003B) else float(raw_value)
 
     def _estimated_extras(self, data):
-        generation_w = data["potencia_instantanea_w"]
-        hour = time.localtime().tm_hour
-        base_load_w = 450 if 8 <= hour <= 17 else 950
-        load_w = max(base_load_w, int(base_load_w + random.uniform(-120, 260)))
-        export_w = max(0, int(generation_w - load_w))
-        import_w = max(0, int(load_w - generation_w))
+        pv_kw = data["potencia_instantanea_w"] / 1000.0
+        grid_voltage = 220.0
+        load_kw = max(0.3, pv_kw * 0.8 + 0.4)
+        export_kw = max(0.0, pv_kw - load_kw)
+        import_kw = max(0.0, load_kw - pv_kw)
+        ac_current = pv_kw * 1000 / grid_voltage if grid_voltage else 0.0
         return {
-            "load_power_w": load_w,
-            "import_power_w": import_w,
-            "export_power_w": export_w,
-            "expected_generation_w": generation_w,
+            "load_power_w": int(load_kw * 1000),
+            "import_power_w": int(import_kw * 1000),
+            "export_power_w": int(export_kw * 1000),
+            "expected_generation_w": int(pv_kw * 1000),
+            "temperature_c": 32.0,
             "weather_label": "não informado",
-            "temperature_c": 28.0,
             "status_code": 1,
+            "inverter_status": "Gerando",
+            "communication_status": "Online",
+            "grid_status": "Normal",
+            "irradiance_wm2": 700,
+            "dc_power_w": int(pv_kw * 1030),
+            "ac_power_w": int(pv_kw * 1000),
+            "dc_input": {"mppt1_voltage_v": 320.0, "mppt1_current_a": 4.8, "mppt1_power_kw": round(pv_kw / 2, 2), "mppt2_voltage_v": 318.0, "mppt2_current_a": 4.7, "mppt2_power_kw": round(pv_kw / 2, 2), "dc_power_kw": round(pv_kw * 1.03, 2)},
+            "ac_output": {"voltage_v": 220.0, "current_a": round(ac_current, 2), "power_kw": round(pv_kw, 2), "frequency_hz": 60.0, "power_factor": 0.98},
+            "grid": {"grid_voltage_v": 220.0, "grid_current_a": round(ac_current, 2), "grid_status": "Normal", "frequency_hz": 60.0, "active_power_kw": round(pv_kw, 2), "apparent_power_kva": round(pv_kw / 0.98, 2)},
+            "inverter": {"temperature_c": 32.0, "efficiency_percent": 96.0, "status": "Gerando", "communication_status": "Online", "operational_state": "Gerando"},
+            "energy": {"today_kwh": data["geracao_dia_kwh"], "total_kwh": data["geracao_total_kwh"], "import_kwh": round(import_kw * 0.08, 3), "export_kwh": round(export_kw * 0.08, 3), "peak_power_kw": round(pv_kw, 2), "generation_start_time": "08:00", "generation_end_time": "17:40", "generation_duration_h": 9.67},
         }
 
     def read_all(self):
@@ -151,7 +267,6 @@ class GrowattModbusReader:
         for name, register in REGISTER_MAP.items():
             raw = self.instrument.read_register(register, 0, False)
             data[name] = self._scale(register, raw)
-
         extras = self.instrument.snapshot_extras() if hasattr(self.instrument, "snapshot_extras") else self._estimated_extras(data)
         data.update(extras)
         data["instant_total_w"] = data["potencia_instantanea_w"]

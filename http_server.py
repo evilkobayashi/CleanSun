@@ -58,6 +58,8 @@ class CleanSunHTTPServer:
             "/api/alerts": lambda q: self.processor.alerts(),
             "/api/profile": lambda q: self.processor.profile(),
             "/api/compare": lambda q: self.processor.compare(),
+            "/api/technical": lambda q: self.processor.technical(),
+            "/api/status": lambda q: self.processor.status(),
             "/api/summary/daily": lambda q: self.processor.summary("daily"),
             "/api/summary/weekly": lambda q: self.processor.summary("weekly"),
             "/api/history": lambda q: {"days": int(q.get("days", "7")), "bucket": q.get("bucket", "hourly"), "rows": self.processor.history_period(int(q.get("days", "7")), q.get("bucket", "hourly"))},

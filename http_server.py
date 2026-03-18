@@ -34,6 +34,11 @@ class CleanSunHTTPServer:
             query[key] = value
         return base, query
 
+    @staticmethod
+    async def _read_body(reader, headers):
+        content_length = int(headers.get("content-length", "0") or "0")
+        return await reader.read(content_length) if content_length > 0 else b""
+
     def _alerts_response(self, q, source="current"):
         severity = q.get("severity") or None
         category = q.get("category") or None
@@ -44,11 +49,7 @@ class CleanSunHTTPServer:
             rows = self.processor.active_alerts(severity=severity, category=category)
         else:
             rows = self.processor.alerts(severity=severity, category=category, active=active)
-        return {
-            "items": rows,
-            "count": len(rows),
-            "filters": {"severity": severity, "category": category, "active": active},
-        }
+        return {"items": rows, "count": len(rows), "filters": {"severity": severity, "category": category, "active": active}, "inverter_type": self.processor.inverter_type()}
 
     async def _handle_client(self, reader, writer):
         try:
@@ -60,15 +61,18 @@ class CleanSunHTTPServer:
             method = parts[0] if parts else "GET"
             path = parts[1] if len(parts) > 1 else "/"
             path, query = self._parse_query(path)
+            headers = {}
             while True:
                 header = await reader.readline()
                 if not header or header in (b"\r\n", b"\n"):
                     break
-            if method != "GET":
-                await self._send(writer, "405 Method Not Allowed", "application/json", json.dumps({"error": "method_not_allowed"}))
-                return
+                text = header.decode("utf-8", "ignore").strip()
+                if ":" in text:
+                    key, value = text.split(":", 1)
+                    headers[key.lower()] = value.strip()
+            body = await self._read_body(reader, headers)
 
-            routes = {
+            get_routes = {
                 "/api/data": lambda q: self.processor.payload(),
                 "/api/dashboard": lambda q: self.processor.dashboard(int(q.get("days", "7")), q.get("bucket", "daily")),
                 "/api/indicators": lambda q: self.processor.indicators(),
@@ -80,20 +84,31 @@ class CleanSunHTTPServer:
                 "/api/technical": lambda q: self.processor.technical(),
                 "/api/diagnostics": lambda q: self.processor.diagnostics(),
                 "/api/status": lambda q: self.processor.status(),
+                "/api/inverter-type": lambda q: {"inverter_type": self.processor.inverter_type()},
                 "/api/summary/daily": lambda q: self.processor.summary("daily"),
                 "/api/summary/weekly": lambda q: self.processor.summary("weekly"),
                 "/api/history": lambda q: {"days": int(q.get("days", "7")), "bucket": q.get("bucket", "hourly"), "rows": self.processor.history_period(int(q.get("days", "7")), q.get("bucket", "hourly"))},
                 "/api/state": lambda q: self.processor.payload(),
             }
 
-            if path == "/":
-                await self._serve_dashboard(writer)
-            elif path == "/api/events":
-                await self._serve_sse(writer)
-            elif path in routes:
-                await self._send(writer, "200 OK", "application/json", json.dumps(routes[path](query), ensure_ascii=False))
-            else:
-                await self._send(writer, "404 Not Found", "application/json", json.dumps({"error": "not_found", "path": path}))
+            if method == "GET":
+                if path == "/":
+                    await self._serve_dashboard(writer)
+                elif path == "/api/events":
+                    await self._serve_sse(writer)
+                elif path in get_routes:
+                    await self._send(writer, "200 OK", "application/json", json.dumps(get_routes[path](query), ensure_ascii=False))
+                else:
+                    await self._send(writer, "404 Not Found", "application/json", json.dumps({"error": "not_found", "path": path}))
+                return
+
+            if method == "POST" and path == "/api/inverter-type":
+                payload = json.loads(body.decode("utf-8") or "{}") if body else {}
+                inverter_type = self.processor.set_inverter_type(payload.get("inverter_type"))
+                await self._send(writer, "200 OK", "application/json", json.dumps({"inverter_type": inverter_type}, ensure_ascii=False))
+                return
+
+            await self._send(writer, "405 Method Not Allowed", "application/json", json.dumps({"error": "method_not_allowed"}))
         except Exception as exc:
             self.processor.register_fault("server_api_failure", str(exc))
             await self._send(writer, "500 Internal Server Error", "application/json", json.dumps({"error": "server_api_failure", "detail": str(exc)}))

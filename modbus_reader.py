@@ -37,6 +37,7 @@ class _FallbackInstrument:
         self._end_generation_ts = None
         self._active_random = "normal"
         self._random_until_ts = 0
+        self.battery_soc = 62.0
 
     @staticmethod
     def _sun_curve(hour_float):
@@ -120,6 +121,7 @@ class _FallbackInstrument:
         generation_kw = max(0.0, expected_kw * weather_gain * (1 + random.uniform(-0.04, 0.04)))
         load_kw = self._house_load(hour_float)
         temp_c = 26 + 15 * sun + random.uniform(-0.8, 1.2)
+        battery_voltage = 50.8 + random.uniform(-1.2, 1.2)
         grid_voltage = 220 + random.uniform(-2.5, 2.5)
         grid_freq = 60 + random.uniform(-0.08, 0.08)
         mppt1_v = max(0.0, 180 + 220 * sun + random.uniform(-4, 4))
@@ -150,6 +152,19 @@ class _FallbackInstrument:
 
         mppt1_a = (mppt1_kw * 1000 / max(mppt1_v, 1)) if mppt1_v else 0.0
         mppt2_a = (mppt2_kw * 1000 / max(mppt2_v, 1)) if mppt2_v else 0.0
+        battery_power_kw = max(-2.8, min(2.8, dc_kw - load_kw * 0.82))
+        if scenario in ("sem_geracao_dia", "falha_comunicacao"):
+            battery_power_kw = -max(0.4, load_kw * 0.65)
+        elif scenario == "temperatura_alta":
+            battery_power_kw *= 0.8
+        self.battery_soc = max(8.0, min(98.0, self.battery_soc + battery_power_kw * delta_h * 7.5))
+        if self.battery_soc < 18:
+            battery_power_kw = min(battery_power_kw, -0.15)
+        battery_current_a = (battery_power_kw * 1000 / max(battery_voltage, 1)) if battery_voltage else 0.0
+        battery_mode = "charging" if battery_power_kw > 0.12 else "discharging" if battery_power_kw < -0.12 else "idle"
+        autonomy_h = (self.battery_soc / 100.0 * 9.6) / max(load_kw, 0.2)
+        backup_mode_active = scenario in ("rede_indisponivel", "sem_geracao_dia") or self.battery_soc < 25
+        operating_mode = "backup" if backup_mode_active else "battery_support" if battery_mode == "discharging" else "grid_assist" if import_kw > 0 else "solar_priority"
 
         if ac_kw > 0.05 and self._start_generation_ts is None:
             self._start_generation_ts = int(now)
@@ -181,6 +196,16 @@ class _FallbackInstrument:
             "dc_power_w": int(dc_kw * 1000),
             "ac_power_w": int(ac_kw * 1000),
             "simulation_scenario": scenario,
+            "battery_soc_percent": round(self.battery_soc, 1),
+            "battery_voltage_v": round(battery_voltage, 1),
+            "battery_current_a": round(battery_current_a, 2),
+            "battery_power_kw": round(battery_power_kw, 2),
+            "battery_mode": battery_mode,
+            "autonomy_hours": round(autonomy_h, 2),
+            "backup_mode_active": backup_mode_active,
+            "operating_mode": operating_mode,
+            "load_power_kw": round(load_kw, 2),
+            "grid_available": grid_available,
             "dc_input": {
                 "mppt1_voltage_v": round(mppt1_v, 1),
                 "mppt1_current_a": round(mppt1_a, 2),
@@ -221,6 +246,22 @@ class _FallbackInstrument:
                 "generation_start_time": time.strftime("%H:%M", time.localtime(self._start_generation_ts)) if self._start_generation_ts else "--:--",
                 "generation_end_time": time.strftime("%H:%M", time.localtime(self._end_generation_ts)) if self._end_generation_ts else "--:--",
                 "generation_duration_h": round(generation_time_h, 2),
+                "battery_available_kwh": round(self.battery_soc / 100.0 * 9.6, 2),
+                "autonomy_hours": round(autonomy_h, 2),
+            },
+            "battery": {
+                "soc_percent": round(self.battery_soc, 1),
+                "voltage_v": round(battery_voltage, 1),
+                "current_a": round(battery_current_a, 2),
+                "power_kw": round(battery_power_kw, 2),
+                "mode": battery_mode,
+                "autonomy_hours": round(autonomy_h, 2),
+                "available_energy_kwh": round(self.battery_soc / 100.0 * 9.6, 2),
+            },
+            "operation": {
+                "operating_mode": operating_mode,
+                "backup_mode_active": backup_mode_active,
+                "grid_available": grid_available,
             },
         }
 
@@ -286,11 +327,23 @@ class GrowattModbusReader:
             "dc_power_w": int(pv_kw * 1030),
             "ac_power_w": int(pv_kw * 1000),
             "simulation_scenario": "hardware",
+            "battery_soc_percent": 68.0,
+            "battery_voltage_v": 51.2,
+            "battery_current_a": -8.6,
+            "battery_power_kw": -0.44,
+            "battery_mode": "discharging",
+            "autonomy_hours": 7.8,
+            "backup_mode_active": False,
+            "operating_mode": "grid_assist",
+            "load_power_kw": round(load_kw, 2),
+            "grid_available": True,
             "dc_input": {"mppt1_voltage_v": 320.0, "mppt1_current_a": 4.8, "mppt1_power_kw": round(pv_kw / 2, 2), "mppt2_voltage_v": 318.0, "mppt2_current_a": 4.7, "mppt2_power_kw": round(pv_kw / 2, 2), "dc_power_kw": round(pv_kw * 1.03, 2)},
             "ac_output": {"voltage_v": 220.0, "current_a": round(ac_current, 2), "power_kw": round(pv_kw, 2), "frequency_hz": 60.0, "power_factor": 0.98},
             "grid": {"grid_voltage_v": 220.0, "grid_current_a": round(ac_current, 2), "grid_status": "Normal", "frequency_hz": 60.0, "active_power_kw": round(pv_kw, 2), "apparent_power_kva": round(pv_kw / 0.98, 2)},
             "inverter": {"temperature_c": 32.0, "efficiency_percent": 96.0, "status": "Gerando", "communication_status": "Online", "operational_state": "Gerando"},
-            "energy": {"today_kwh": data["geracao_dia_kwh"], "total_kwh": data["geracao_total_kwh"], "import_kwh": round(import_kw * 0.08, 3), "export_kwh": round(export_kw * 0.08, 3), "peak_power_kw": round(pv_kw, 2), "generation_start_time": "08:00", "generation_end_time": "17:40", "generation_duration_h": 9.67},
+            "energy": {"today_kwh": data["geracao_dia_kwh"], "total_kwh": data["geracao_total_kwh"], "import_kwh": round(import_kw * 0.08, 3), "export_kwh": round(export_kw * 0.08, 3), "peak_power_kw": round(pv_kw, 2), "generation_start_time": "08:00", "generation_end_time": "17:40", "generation_duration_h": 9.67, "battery_available_kwh": 6.53, "autonomy_hours": 7.8},
+            "battery": {"soc_percent": 68.0, "voltage_v": 51.2, "current_a": -8.6, "power_kw": -0.44, "mode": "discharging", "autonomy_hours": 7.8, "available_energy_kwh": 6.53},
+            "operation": {"operating_mode": "grid_assist", "backup_mode_active": False, "grid_available": True},
         }
 
     def read_all(self):

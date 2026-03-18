@@ -16,6 +16,7 @@ DEFAULT_CONFIG = {
     "data_stale_seconds": 20,
     "simulation_anomalies_enabled": True,
     "simulation_random_fault_rate": 0.04,
+    "inverter_type": "hybrid",
 }
 
 HISTORY_HEADER = "timestamp,geracao_kwh,consumo_kwh,exportado_kwh,solar_generation_kwh,house_consumption_kwh,grid_import_kwh,grid_export_kwh,self_consumption_kwh,estimated_savings_brl,weather_condition,expected_generation_kwh\n"
@@ -71,6 +72,7 @@ class DataProcessor:
             "history": {"daily": [], "weekly": [], "monthly": []},
             "status": {},
             "diagnostics": {},
+            "inverter_type": "hybrid",
         }
 
     def register_fault(self, title, detail=""):
@@ -90,6 +92,7 @@ class DataProcessor:
         profile = self._build_profile(history_rows, alerts)
         diagnostics = self.alarm_engine.diagnostics(snapshot, indicators, technical, alerts, self.last_update_ts, fault=self.fault)
         self.last_dashboard = {
+            "inverter_type": self.inverter_type(),
             "indicators": indicators,
             "alerts": alerts,
             "profile": profile,
@@ -174,6 +177,8 @@ class DataProcessor:
         grid = snapshot.get("grid", {})
         inverter = snapshot.get("inverter", {})
         energy = snapshot.get("energy", {})
+        battery = snapshot.get("battery", {})
+        operation = snapshot.get("operation", {})
         return {
             "dc_input": {
                 "mppt1_voltage_v": round(dc_input.get("mppt1_voltage_v", snapshot.get("tensao_dc_v", 0)), 1),
@@ -219,6 +224,21 @@ class DataProcessor:
             "irradiance": {
                 "irradiance_wm2": int(snapshot.get("irradiance_wm2", 0)),
                 "solar_condition": snapshot.get("weather_label", "não informado"),
+            },
+            "battery": {
+                "soc_percent": round(battery.get("soc_percent", snapshot.get("battery_soc_percent", 0.0)), 1),
+                "voltage_v": round(battery.get("voltage_v", snapshot.get("battery_voltage_v", 0.0)), 1),
+                "current_a": round(battery.get("current_a", snapshot.get("battery_current_a", 0.0)), 2),
+                "power_kw": round(battery.get("power_kw", snapshot.get("battery_power_kw", 0.0)), 2),
+                "mode": battery.get("mode", snapshot.get("battery_mode", "idle")),
+                "autonomy_hours": round(battery.get("autonomy_hours", snapshot.get("autonomy_hours", 0.0)), 2),
+                "available_energy_kwh": round(battery.get("available_energy_kwh", energy.get("battery_available_kwh", 0.0)), 2),
+            },
+            "operation": {
+                "operating_mode": operation.get("operating_mode", snapshot.get("operating_mode", "solar_priority")),
+                "backup_mode_active": bool(operation.get("backup_mode_active", snapshot.get("backup_mode_active", False))),
+                "grid_available": bool(operation.get("grid_available", snapshot.get("grid_available", True))),
+                "load_power_kw": round(snapshot.get("load_power_kw", indicators.get("consumo_atual_kw", 0.0)), 2),
             },
             "diagnostics": {
                 "communication_status": snapshot.get("communication_status", "Desconhecido"),
@@ -439,6 +459,59 @@ class DataProcessor:
     def _history_views(self, rows):
         return {"daily": self.history_period(7, "daily"), "weekly": self.history_period(35, "weekly"), "monthly": self.history_period(365, "monthly")}
 
+    def inverter_type(self):
+        raw = str(self.config.get("inverter_type", "hybrid")).strip().lower()
+        if raw in ("híbrido", "hibrido"):
+            return "hybrid"
+        if raw in ("on-grid", "off-grid", "hybrid"):
+            return raw
+        return "hybrid"
+
+    def set_inverter_type(self, inverter_type):
+        normalized = str(inverter_type or "hybrid").strip().lower()
+        if normalized in ("híbrido", "hibrido"):
+            normalized = "hybrid"
+        if normalized not in ("on-grid", "off-grid", "hybrid"):
+            raise ValueError("invalid_inverter_type")
+        self.config["inverter_type"] = normalized
+        self._write_json(self.config_path, self.config)
+        if self.last_dashboard:
+            self.last_dashboard["inverter_type"] = normalized
+        return normalized
+
+    def _filter_payload_by_inverter_type(self, data, inverter_type=None):
+        inverter_type = inverter_type or self.inverter_type()
+        dashboard = dict(data.get("dashboard", {})) if isinstance(data, dict) else {}
+        indicators = dict(dashboard.get("indicators", {}))
+        technical = dict(dashboard.get("technical", {}))
+        reports = dict(dashboard.get("reports", {}))
+        alerts = list(dashboard.get("alerts", []))
+        allowed_categories = {"geração", "entrada_dc", "eficiência", "temperatura", "comunicação", "diagnóstico"}
+        if inverter_type == "on-grid":
+            technical.pop("battery", None)
+            technical.pop("operation", None)
+            alerts = [a for a in alerts if a.get("category") != "segurança" or not a.get("code", "").startswith("BATTERY_")]
+        elif inverter_type == "off-grid":
+            for key in ("exportado_kwh", "importado_kwh", "economia_diaria_rs", "economia_mensal_rs", "economia_anual_rs", "autossuficiencia_pct"):
+                indicators.pop(key, None)
+            technical.pop("grid", None)
+            technical["operation"] = technical.get("operation", {})
+            reports["daily"] = reports.get("daily", "").replace("exportou", "entregou às cargas").replace("economia estimada", "energia útil estimada")
+            allowed_categories |= {"segurança", "consumo"}
+            alerts = [a for a in alerts if a.get("category") in allowed_categories and a.get("code") not in ("GRID_UNDERVOLTAGE", "GRID_OVERVOLTAGE", "GRID_FREQ_OUT_OF_RANGE", "LOW_GRID_EXPORT_AT_PEAK", "EXCESSIVE_GRID_IMPORT")]
+        else:
+            allowed_categories |= {"rede", "segurança", "consumo"}
+            alerts = [a for a in alerts if a.get("category") in allowed_categories]
+        dashboard["indicators"] = indicators
+        dashboard["technical"] = technical
+        dashboard["reports"] = reports
+        dashboard["alerts"] = alerts
+        dashboard["inverter_type"] = inverter_type
+        out = dict(data)
+        out["dashboard"] = dashboard
+        out["inverter_type"] = inverter_type
+        return out
+
     def _filter_alerts(self, items, severity=None, category=None, active=None):
         out = list(items)
         if severity:
@@ -452,13 +525,14 @@ class DataProcessor:
         return out
 
     def payload(self):
-        return {"config": self.config, "snapshot": self.last_snapshot, "dashboard": self.last_dashboard, "updated_at": self.last_update_ts, "fault": self.fault}
+        base={"config": self.config, "snapshot": self.last_snapshot, "dashboard": self.last_dashboard, "updated_at": self.last_update_ts, "fault": self.fault, "inverter_type": self.inverter_type()}
+        return self._filter_payload_by_inverter_type(base)
 
     def indicators(self):
-        return self.last_dashboard.get("indicators", {})
+        return self.payload().get("dashboard", {}).get("indicators", {})
 
     def alerts(self, severity=None, category=None, active=None):
-        return self._filter_alerts(self.last_dashboard.get("alerts", []), severity=severity, category=category, active=active)
+        return self._filter_alerts(self.payload().get("dashboard", {}).get("alerts", []), severity=severity, category=category, active=active)
 
     def active_alerts(self, severity=None, category=None):
         return self.alerts(severity=severity, category=category, active=True)
@@ -467,19 +541,19 @@ class DataProcessor:
         return self._filter_alerts(self.alarm_engine.history, severity=severity, category=category, active=None)
 
     def profile(self):
-        return self.last_dashboard.get("profile", {})
+        return self.payload().get("dashboard", {}).get("profile", {})
 
     def compare(self):
-        return self.last_dashboard.get("compare", {})
+        return self.payload().get("dashboard", {}).get("compare", {})
 
     def technical(self):
-        return self.last_dashboard.get("technical", {})
+        return self.payload().get("dashboard", {}).get("technical", {})
 
     def diagnostics(self):
-        return self.last_dashboard.get("diagnostics", {})
+        return self.payload().get("dashboard", {}).get("diagnostics", {})
 
     def status(self):
-        status = dict(self.last_dashboard.get("status", {}))
+        status = dict(self.payload().get("dashboard", {}).get("status", {}))
         status["active_alert_codes"] = [a["code"] for a in self.active_alerts()]
         return status
 
@@ -489,4 +563,4 @@ class DataProcessor:
     def dashboard(self, days=7, bucket="daily"):
         data = dict(self.payload())
         data["history_filtered"] = self.history_period(days, bucket)
-        return data
+        return self._filter_payload_by_inverter_type(data)

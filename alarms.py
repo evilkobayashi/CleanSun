@@ -51,6 +51,8 @@ class AlarmEngine:
         grid = technical.get("grid", {})
         inverter = technical.get("inverter", {})
         diagnostics = technical.get("diagnostics", {})
+        battery = technical.get("battery", {})
+        operation = technical.get("operation", {})
         now = int(time.time())
         updated_at = int(updated_at or ts)
         expected_kw = float(indicators.get("geracao_esperada_kw", 0.0))
@@ -254,6 +256,38 @@ class AlarmEngine:
                        probable_causes=["poeira", "folhas", "poluição", "falta de limpeza periódica"],
                        recommended_action="Avaliar necessidade de limpeza dos módulos e comparar desempenho após manutenção.",
                        timestamp=ts, source="generation_model", affected_component="instalação")
+
+        if self._persist("BATTERY_LOW_SOC", float(battery.get("soc_percent", 100.0)) < 22.0, 2):
+            self._push(alarms, code="BATTERY_LOW_SOC", category="segurança", severity="warning", title="Estado de carga da bateria baixo",
+                       technical_description="O banco de baterias está com estado de carga abaixo da faixa recomendada para operação contínua.",
+                       simplified_message="A bateria está com pouca carga disponível.",
+                       probable_causes=["consumo elevado", "baixa geração solar", "carga insuficiente durante o dia"],
+                       recommended_action="Reduzir cargas não essenciais e verificar estratégia de recarga da bateria.",
+                       timestamp=ts, source="inverter", affected_component="instalação")
+
+        if self._persist("BATTERY_LOW_AUTONOMY", float(battery.get("autonomy_hours", 99.0)) < 2.0 and float(battery.get("soc_percent", 100.0)) < 35.0, 2):
+            self._push(alarms, code="BATTERY_LOW_AUTONOMY", category="segurança", severity="critical", title="Autonomia da bateria muito baixa",
+                       technical_description="A autonomia estimada do sistema em bateria está abaixo do mínimo seguro para manutenção das cargas atuais.",
+                       simplified_message="A energia armazenada pode acabar em pouco tempo.",
+                       probable_causes=["cargas elevadas", "baixa carga da bateria", "ausência de apoio solar"],
+                       recommended_action="Desligar cargas não críticas e priorizar recarga/retorno à rede quando disponível.",
+                       timestamp=ts, source="load_profile", affected_component="instalação")
+
+        if self._persist("BATTERY_UNDERVOLTAGE", float(battery.get("voltage_v", 99.0)) < 46.5, 2):
+            self._push(alarms, code="BATTERY_UNDERVOLTAGE", category="segurança", severity="critical", title="Subtensão da bateria",
+                       technical_description="A tensão do banco de baterias caiu abaixo do limite operacional seguro.",
+                       simplified_message="A bateria está em subtensão e precisa de atenção imediata.",
+                       probable_causes=["descarga profunda", "falha de carregamento", "degradação da bateria"],
+                       recommended_action="Interromper descarga profunda, verificar carregador e avaliar estado do banco de baterias.",
+                       timestamp=ts, source="inverter", affected_component="instalação")
+
+        if self._persist("BACKUP_MODE_ACTIVE", bool(operation.get("backup_mode_active")), 2):
+            self._push(alarms, code="BACKUP_MODE_ACTIVE", category="diagnóstico", severity="info", title="Modo backup ativo",
+                       technical_description="O inversor entrou em modo de backup ou suporte por bateria para manter as cargas alimentadas.",
+                       simplified_message="O sistema está operando em modo de backup/apoio por bateria.",
+                       probable_causes=["indisponibilidade de rede", "estratégia operacional híbrida"],
+                       recommended_action="Acompanhar a autonomia disponível e o retorno da rede elétrica, se aplicável.",
+                       timestamp=ts, source="inverter", affected_component="inversor")
 
         avg_consumption = self._avg(recent_consumption[:-1]) if len(recent_consumption) > 1 else 0.0
         if self._persist("ABNORMAL_LOAD_PROFILE", avg_consumption > 0 and indicators.get("consumo_kwh", 0.0) > avg_consumption * 1.8, 2):

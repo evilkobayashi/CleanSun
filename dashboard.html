@@ -1,31 +1,387 @@
-<!doctype html><html lang="pt-br"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CleanSun</title><style>
-:root{--bg:#0f1a20;--surface:#162028;--surface2:#1c2b35;--border:#243040;--text:#e8f2f8;--muted:#87a6ba;--sun:#f5a623;--green:#3b9e52;--blue:#378add;--warn:#e8960f;--bad:#c44444}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.45 system-ui,sans-serif}.wrap{max-width:1180px;margin:auto;padding:18px}.top,.grid2,.grid3,.grid4{display:grid;gap:12px}.top{grid-template-columns:1.6fr 1fr}.grid4{grid-template-columns:repeat(4,1fr)}.grid3{grid-template-columns:repeat(3,1fr)}.grid2{grid-template-columns:repeat(2,1fr)}.card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px}.title{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px}.big{font-size:2rem;font-weight:700}.hero{display:flex;justify-content:space-between;gap:12px;align-items:center}.badge{padding:8px 12px;border-radius:999px;background:var(--surface2);border:1px solid var(--border);font-size:13px}.mode-toggle,.filters,.sevfilters{display:flex;gap:8px;flex-wrap:wrap}.btn{border:1px solid var(--border);background:var(--surface2);color:var(--text);padding:10px 12px;border-radius:10px;cursor:pointer}.btn.active{border-color:var(--sun);background:#26343f}.kpi{border-left:4px solid var(--sun)}.kpi.green{border-left-color:var(--green)}.kpi.blue{border-left-color:var(--blue)}.kpi.warn{border-left-color:var(--warn)}.small{font-size:13px;color:var(--muted)}.alerts,.messages,.reports,.recs,.techgroups{display:flex;flex-direction:column;gap:10px}.alert,.message,.report,.rec,.group{padding:12px;border-radius:12px;background:var(--surface2)}.alert{border-left:4px solid var(--blue)}.alert.atencao{border-left-color:var(--warn)}.alert.critico{border-left-color:var(--bad)}.alert header{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:6px}.sev{font-size:11px;text-transform:uppercase;padding:4px 8px;border-radius:999px;background:#24333e}.critico .sev{background:rgba(196,68,68,.2);color:#ffb0b0}.atencao .sev{background:rgba(232,150,15,.2);color:#ffd089}.informativo .sev{background:rgba(55,138,221,.18);color:#a9d4ff}.bars{display:grid;grid-template-columns:repeat(24,1fr);gap:4px;height:170px;align-items:end}.bar{position:relative;background:#25333d;border-radius:5px 5px 0 0;min-height:10px}.bar i{position:absolute;left:0;right:0;bottom:0;background:var(--sun);border-radius:5px 5px 0 0}.bar b{position:absolute;bottom:-18px;left:50%;transform:translateX(-50%);font-size:10px;color:var(--muted)}.weekly{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;height:170px;align-items:end}.wbar{position:relative;background:#25333d;border-radius:6px 6px 0 0;min-height:10px}.wbar .g{position:absolute;left:0;right:0;bottom:0;background:var(--sun);opacity:.9}.wbar .c{position:absolute;left:24%;right:24%;bottom:0;background:var(--blue);opacity:.85}.wbar .e{position:absolute;left:40%;right:40%;bottom:0;background:var(--green);opacity:.85}.wbar span{position:absolute;bottom:-20px;left:50%;transform:translateX(-50%);font-size:11px;color:var(--muted)}.gauge{height:16px;background:#25333d;border-radius:999px;overflow:hidden}.gauge>i{display:block;height:100%;background:linear-gradient(90deg,var(--bad),var(--warn),var(--green))}.table{display:grid;grid-template-columns:1fr 1fr;gap:8px}.metric{padding:10px;border-radius:10px;background:var(--surface2)}.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.hidden{display:none}.group h4{margin:0 0 10px;font-size:14px}.kv{display:grid;grid-template-columns:1fr auto;gap:8px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04)}.kv:last-child{border-bottom:0}.footer{margin-top:18px;color:var(--muted);font-size:12px}@media(max-width:980px){.top,.grid4,.grid3,.grid2,.table{grid-template-columns:1fr}}@media(max-width:560px){.big{font-size:1.6rem}.wrap{padding:12px}}
-</style></head><body><div class="wrap">
-<div class="top">
-  <div class="card"><div class="hero"><div><div class="title">CleanSun</div><div class="big" id="headline">Carregando...</div><div class="small" id="subline">Aguardando primeira leitura do sistema.</div></div><div class="badge" id="modeBadge">Modo simplificado</div></div><div class="mode-toggle" style="margin-top:12px"><button class="btn active" id="btnSimple">Simplificado</button><button class="btn" id="btnTech">Técnico</button></div></div>
-  <div class="card"><div class="title">Filtros e atualização</div><div class="filters"><button class="btn active" data-days="1">Hoje</button><button class="btn" data-days="7">7 dias</button><button class="btn" data-days="30">30 dias</button></div><div class="small" style="margin-top:10px">Instalação: <span id="installName">Residência</span></div><div class="small">Conexão: <span id="conn">Conectando...</span></div></div>
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CleanSun</title>
+<style>
+:root{
+  --bg:#141414;
+  --surface:#212121;
+  --surface-soft:#262626;
+  --border:#5a513f;
+  --text:#f7f0dc;
+  --muted:#b5aa90;
+  --sun:#d89a2b;
+  --sun-soft:#edb247;
+  --blue:#4e8fca;
+  --blue-soft:#78aee1;
+  --green:#7bb05b;
+  --green-soft:#a8d38a;
+  --warn:#c98f36;
+  --bad:#ce6b5f;
+  --shadow:0 8px 22px rgba(0,0,0,.22);
+}
+*{box-sizing:border-box}
+body{margin:0;background:linear-gradient(180deg,#171717,#111);color:var(--text);font:14px/1.45 system-ui,sans-serif}
+.wrap{max-width:980px;margin:auto;padding:16px}
+.shell{background:#1b1b1b;border:1px solid rgba(255,255,255,.05);border-radius:18px;padding:12px;box-shadow:var(--shadow)}
+.topbar{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:12px}
+.brand{display:flex;align-items:center;gap:10px}
+.brand .logo{width:18px;height:18px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#ffe3a0 0 28%,#f4b545 29% 58%,#d58a17 59% 100%);box-shadow:0 0 16px rgba(216,154,43,.45)}
+.brand h1{margin:0;font-size:16px;color:var(--sun-soft)}
+.brand small{display:block;color:var(--muted);font-size:11px}
+.top-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-items:center}
+.pill,.btn{border:1px solid var(--border);background:var(--surface-soft);color:var(--text);border-radius:999px;padding:6px 12px;font-size:11px}
+.btn{cursor:pointer}
+.btn.active{background:#322b1d;border-color:var(--sun);color:#fff7df}
+.timestamp{font-size:11px;color:var(--muted)}
+.grid3,.grid2{display:grid;gap:12px}
+.grid3{grid-template-columns:repeat(3,1fr)}
+.grid2{grid-template-columns:repeat(2,1fr)}
+.section{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px;box-shadow:var(--shadow)}
+.section-title{margin:0 0 10px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#f5d8a0}
+.kpi-value{font-size:30px;font-weight:800;line-height:1}
+.kpi-foot{margin-top:6px;font-size:11px;color:var(--muted)}
+.kpi-foot strong{color:#fff}
+.flow{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;align-items:center;text-align:center}
+.bubble{display:flex;flex-direction:column;align-items:center;gap:6px}
+.icon{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:16px;background:#2d2a22;border:1px solid #7a6340;color:#ffdb91}
+.icon.blue{background:#202a36;border-color:#4974a4;color:#b8d8ff}
+.icon.green{background:#243221;border-color:#537c49;color:#d1f0b8}
+.arrow{font-size:20px;color:var(--muted);align-self:center;justify-self:center}
+.flow .value{font-size:13px;font-weight:700}
+.flow .label{font-size:11px;color:var(--muted)}
+.chart-wrap{height:220px;position:relative;border-radius:10px;background:linear-gradient(180deg,#232323,#1f1f1f);border:1px solid rgba(255,255,255,.04);padding:10px}
+.chart-grid{position:absolute;inset:10px 10px 30px 42px;background:repeating-linear-gradient(to top,rgba(255,255,255,.06),rgba(255,255,255,.06) 1px,transparent 1px,transparent 36px)}
+.line-svg{position:absolute;inset:10px 10px 30px 42px;width:calc(100% - 52px);height:calc(100% - 40px);overflow:visible}
+.axis-y,.axis-x{position:absolute;font-size:10px;color:var(--muted)}
+.axis-y{left:8px;top:10px;bottom:30px;width:30px;display:flex;flex-direction:column;justify-content:space-between;text-align:right}
+.axis-x{left:42px;right:10px;bottom:8px;display:flex;justify-content:space-between}
+.legend{display:flex;gap:14px;align-items:center;margin-top:10px;font-size:11px;color:var(--muted)}
+.legend i{display:inline-block;width:12px;height:3px;border-radius:999px;margin-right:6px;vertical-align:middle}
+.mini-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.gauge-card{display:flex;gap:12px;align-items:center}
+.gauge{width:112px;height:112px;border-radius:50%;background:conic-gradient(var(--sun) 0 var(--gauge),#3a3a3a var(--gauge) 100%);display:grid;place-items:center;flex:none}
+.gauge::after{content:"";width:78px;height:78px;border-radius:50%;background:#232323;border:1px solid rgba(255,255,255,.05);box-shadow:inset 0 0 0 1px rgba(0,0,0,.25)}
+.gauge-center{position:absolute;text-align:center}
+.gauge-center strong{display:block;font-size:18px}
+.gauge-center span{font-size:10px;color:var(--muted);text-transform:uppercase}
+.metric-stack{display:flex;flex-direction:column;gap:6px}
+.metric-stack .row{display:flex;justify-content:space-between;gap:8px;font-size:11px;color:var(--muted)}
+.metric-stack .row strong{color:#fff}
+.status-scale{height:6px;border-radius:999px;background:linear-gradient(90deg,var(--bad),var(--warn),var(--green));margin-top:4px;opacity:.9}
+.bars{display:grid;grid-template-columns:repeat(7,1fr);gap:10px;height:150px;align-items:end;margin-top:4px}
+.bar-col{display:flex;flex-direction:column;align-items:center;gap:8px;height:100%}
+.bar-stack{flex:1;width:100%;display:flex;align-items:flex-end;justify-content:center;gap:4px}
+.bar{width:16px;border-radius:4px 4px 0 0;min-height:8px;background:var(--sun)}
+.bar.blue{background:var(--blue)}
+.bar-col span{font-size:11px;color:var(--muted)}
+.list{display:flex;flex-direction:column;gap:8px}
+.item{display:flex;gap:10px;align-items:flex-start;padding:10px;border-radius:10px;background:#262626;border:1px solid rgba(255,255,255,.04)}
+.dot{width:9px;height:9px;border-radius:50%;margin-top:5px;background:var(--green)}
+.item.atencao .dot{background:var(--warn)}
+.item.critico .dot{background:var(--bad)}
+.item.informativo .dot{background:var(--blue)}
+.item strong{display:block;font-size:12px}
+.item small{display:block;color:var(--muted);font-size:11px}
+.toggle-line,.filter-line{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.tech-panel{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.tech-card{background:#262626;border:1px solid rgba(255,255,255,.05);border-radius:10px;padding:10px}
+.tech-card h4{margin:0 0 8px;font-size:12px;color:#f4d69b}
+.kv{display:grid;grid-template-columns:1fr auto;gap:8px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:11px;color:var(--muted)}
+.kv:last-child{border-bottom:0}
+.kv strong{color:#fff;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.hidden{display:none}
+.footer-note{margin-top:10px;font-size:11px;color:var(--muted)}
+@media(max-width:820px){.grid3,.grid2,.mini-grid,.tech-panel{grid-template-columns:1fr}.flow{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}.topbar{flex-direction:column;align-items:flex-start}.top-actions{justify-content:flex-start}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="shell">
+    <div class="topbar">
+      <div class="brand">
+        <div class="logo"></div>
+        <div>
+          <h1>CleanSun</h1>
+          <small id="installName">Residência</small>
+        </div>
+      </div>
+      <div class="top-actions">
+        <span class="pill" id="modeBadge">Modo simplificado</span>
+        <span class="pill" id="conn">Conectando...</span>
+        <span class="timestamp" id="updatedAt">--:--</span>
+      </div>
+    </div>
+
+    <div class="toggle-line">
+      <button class="btn active" id="btnSimple">Simplificado</button>
+      <button class="btn" id="btnTech">Técnico</button>
+      <button class="btn active" data-days="1">Hoje</button>
+      <button class="btn" data-days="7">7 dias</button>
+      <button class="btn" data-days="30">30 dias</button>
+    </div>
+
+    <div class="grid3">
+      <section class="section">
+        <h2 class="section-title">Geração do dia</h2>
+        <div class="kpi-value" id="geracaoDia">0,00</div>
+        <div class="kpi-foot"><strong id="weather">Clima: --</strong><br><span id="headline">Aguardando dados</span></div>
+      </section>
+      <section class="section">
+        <h2 class="section-title">Economia do dia</h2>
+        <div class="kpi-value">R$ <span id="ecoDia">0,00</span></div>
+        <div class="kpi-foot">Mês: <strong id="ecoMes">R$ 0,00</strong><br>Ano: <strong id="ecoAno">R$ 0,00</strong></div>
+      </section>
+      <section class="section">
+        <h2 class="section-title">Enviado à rede</h2>
+        <div class="kpi-value" id="exportada">0,00</div>
+        <div class="kpi-foot"><strong id="importada">0,00 kWh importados</strong><br><span id="subline">Aguardando primeira leitura do sistema.</span></div>
+      </section>
+    </div>
+
+    <section class="section" style="margin-top:12px">
+      <h2 class="section-title">Fluxo de energia agora</h2>
+      <div class="flow">
+        <div class="bubble">
+          <div class="icon">☀</div>
+          <div class="value" id="pvNow">0,00 kW</div>
+          <div class="label">Solar</div>
+        </div>
+        <div class="arrow">➜</div>
+        <div class="bubble">
+          <div class="icon green">⌂</div>
+          <div class="value" id="loadNow">0,00 kW</div>
+          <div class="label">Carga</div>
+        </div>
+        <div class="bubble">
+          <div class="icon blue">↯</div>
+          <div class="value" id="gridNow">0,00 kW</div>
+          <div class="label">Rede</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" style="margin-top:12px">
+      <h2 class="section-title">Geração hora a hora (kW)</h2>
+      <div class="chart-wrap">
+        <div class="axis-y" id="axisY"></div>
+        <div class="chart-grid"></div>
+        <svg class="line-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
+          <polyline id="genLine" fill="none" stroke="var(--sun)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" points=""></polyline>
+          <polyline id="loadLine" fill="none" stroke="var(--blue)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" points=""></polyline>
+        </svg>
+        <div class="axis-x" id="axisX"></div>
+      </div>
+      <div class="legend"><span><i style="background:var(--sun)"></i>Geração</span><span><i style="background:var(--blue)"></i>Consumo</span></div>
+    </section>
+
+    <div class="mini-grid" style="margin-top:12px">
+      <section class="section">
+        <h2 class="section-title">Autoconsumo</h2>
+        <div class="gauge-card">
+          <div style="position:relative">
+            <div class="gauge" id="gauge" style="--gauge:0%"></div>
+            <div class="gauge-center"><strong id="autoCons">0%</strong><span>Solar</span></div>
+          </div>
+          <div class="metric-stack">
+            <div class="row"><span>Produção</span><strong id="prodMes">Mês: 0,00</strong></div>
+            <div class="row"><span>Rede</span><strong id="redeMes">Rede: 0,00</strong></div>
+            <div class="row"><span>Autossuficiência</span><strong id="autoSuf">0%</strong></div>
+            <div class="footer-note" id="messages"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2 class="section-title">Performance ratio</h2>
+        <div class="kpi-value" id="prValue">0,00</div>
+        <div class="kpi-foot"><strong id="diffExp">0%</strong><br><span id="prStatus">Sem interpretação</span></div>
+        <div class="status-scale"></div>
+        <div class="metric-stack" style="margin-top:10px">
+          <div class="row"><span>Média do dia</span><strong id="dailyReportMini">--</strong></div>
+          <div class="row"><span>Status</span><strong id="statusState">--</strong></div>
+          <div class="row"><span>Alarmes ativos</span><strong id="alarmCount">0</strong></div>
+        </div>
+      </section>
+    </div>
+
+    <section class="section" style="margin-top:12px">
+      <h2 class="section-title">Histórico semanal (kWh)</h2>
+      <div class="bars" id="weekBars"></div>
+    </section>
+
+    <section class="section" style="margin-top:12px">
+      <div class="filter-line">
+        <h2 class="section-title" style="margin:0;flex:1">Frases automáticas</h2>
+        <button class="btn active" data-sev="all">Todos</button>
+        <button class="btn" data-sev="critico">Crítico</button>
+        <button class="btn" data-sev="atencao">Atenção</button>
+        <button class="btn" data-sev="informativo">Informativo</button>
+      </div>
+      <div class="list" id="alerts"></div>
+      <div class="list" id="reports" style="margin-top:10px"></div>
+      <div class="list" id="recs" style="margin-top:10px"></div>
+    </section>
+
+    <section class="section hidden" id="techPanel" style="margin-top:12px">
+      <h2 class="section-title">Painel técnico</h2>
+      <div class="tech-panel" id="techGroups"></div>
+    </section>
+  </div>
 </div>
-<div class="grid4" style="margin-top:12px"><div class="card kpi"><div class="title">Economia do dia</div><div class="big" id="ecoDia">R$ 0,00</div><div class="small" id="ecoMes">Mês: R$ 0,00</div></div><div class="card kpi green"><div class="title">Autoconsumo</div><div class="big" id="autoCons">0%</div><div class="small" id="autoSuf">Autossuficiência: 0%</div></div><div class="card kpi blue"><div class="title">Energia exportada</div><div class="big" id="exportada">0,00 kWh</div><div class="small" id="importada">Importada: 0,00 kWh</div></div><div class="card kpi warn"><div class="title">Comparação com esperado</div><div class="big" id="diffExp">0%</div><div class="small" id="weather">Clima: --</div></div></div>
-<div class="grid2" style="margin-top:12px"><div class="card"><div class="title">Alertas</div><div class="sevfilters"><button class="btn active" data-sev="all">Todos</button><button class="btn" data-sev="critico">Crítico</button><button class="btn" data-sev="atencao">Atenção</button><button class="btn" data-sev="informativo">Informativo</button></div><div class="alerts" id="alerts" style="margin-top:10px"></div></div><div class="card"><div class="title">Relatórios automáticos</div><div class="reports" id="reports"></div></div></div>
-<div class="grid2" style="margin-top:12px"><div class="card"><div class="title">Geração por hora</div><div class="bars" id="hourBars"></div></div><div class="card"><div class="title">Histórico semanal</div><div class="weekly" id="weekBars"></div></div></div>
-<div class="grid2" style="margin-top:12px"><div class="card"><div class="title">Interpretação simplificada</div><div class="messages" id="messages"></div><div class="title" style="margin-top:14px">Recomendações</div><div class="recs" id="recs"></div></div><div class="card"><div class="title">Painel simplificado / técnico</div><div class="gauge"><i id="gaugeFill" style="width:0%"></i></div><div class="small" style="margin-top:8px">Aproveitamento da energia solar: <span id="aprov">0%</span></div><div id="simplePanel" style="margin-top:12px"></div><div id="techPanel" class="hidden" style="margin-top:12px"><div class="techgroups" id="techGroups"></div></div></div></div>
-<div class="card" style="margin-top:12px"><div class="title">Comparação entre períodos</div><div class="table" id="compare"></div></div><div class="footer">CleanSun · Protótipo acadêmico com painel leigo e painel técnico de monitoramento fotovoltaico.</div>
-</div><script>
+<script>
 let mode='simple',days=1,sev='all';
-const $=id=>document.getElementById(id),fmtN=v=>Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}),fmtP=v=>Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})+'%';
-function sevClass(s){return s==='critico'?'critico':s==='atencao'?'atencao':'informativo'}
-function renderAlerts(items){const filtered=(items||[]).filter(a=>sev==='all'||a.severity===sev);$('alerts').innerHTML=filtered.map(a=>`<div class="alert ${sevClass(a.severity)}"><header><strong>${a.title}</strong><span class="sev">${a.severity}</span></header><div class="small"><strong>Código:</strong> ${a.code}</div><div class="small"><strong>Técnico:</strong> ${a.technical_description}</div><div class="small"><strong>Usuário:</strong> ${a.user_message}</div><div class="small"><strong>Ação:</strong> ${a.recommended_action}</div><div class="small"><strong>Timestamp:</strong> ${new Date((a.timestamp||0)*1000).toLocaleString('pt-BR')}</div></div>`).join('')||'<div class="alert informativo"><strong>Sem alarmes</strong></div>'}
-function renderReports(r){$('reports').innerHTML=`<div class="report"><strong>Resumo diário</strong><div class="small">${r.daily||'Sem dados.'}</div></div><div class="report"><strong>Resumo semanal</strong><div class="small">${r.weekly||'Sem dados.'}</div></div>`}
-function renderMessages(s){$('messages').innerHTML=(s.messages||[]).map(m=>`<div class="message">${m}</div>`).join('')}
-function renderRecs(p){$('recs').innerHTML=(p.recommendations||[]).map(m=>`<div class="rec">${m}</div>`).join('')}
-function renderHourBars(hourly){let out='';const arr=[];for(let i=0;i<24;i++){const item=hourly?.[String(i)]||hourly?.[i]||{generation_w:0};arr.push(Number(item.generation_w||0)/1000)}const max=Math.max(0.2,...arr);for(let i=0;i<24;i++){const item=hourly?.[String(i)]||hourly?.[i]||{generation_w:0};const h=Math.max(6,(Number(item.generation_w||0)/1000)/max*100);out+=`<div class="bar"><i style="height:${h}%"></i><b>${i}</b></div>`}$('hourBars').innerHTML=out}
-function renderWeekBars(rows){const vals=(rows||[]).slice(-7);const max=Math.max(0.2,...vals.map(v=>Number(v.geracao_kwh||0)));$('weekBars').innerHTML=vals.map(v=>{const g=Math.max(8,Number(v.geracao_kwh||0)/max*100),c=Math.max(6,Number(v.consumo_kwh||0)/max*100),e=Math.max(4,Number(v.exportado_kwh||0)/max*100);return `<div class="wbar"><div class="g" style="height:${g}%"></div><div class="c" style="height:${c}%"></div><div class="e" style="height:${e}%"></div><span>${v.label||''}</span></div>`}).join('')}
-function renderCompare(c){const blocks=[['Hoje x Ontem',c.today_vs_yesterday],['Semana atual x anterior',c.week_vs_previous],['Mês atual x anterior',c.month_vs_previous]];$('compare').innerHTML=blocks.map(([t,b])=>`<div class="metric"><strong>${t}</strong><div class="small">Atual: ${fmtN(b?.current_kwh)} kWh · Anterior: ${fmtN(b?.previous_kwh)} kWh · Δ ${fmtN(b?.delta_kwh)} kWh (${fmtP(b?.delta_pct)})</div></div>`).join('')}
-function groupBlock(title,obj,units={}){return `<div class="group"><h4>${title}</h4>${Object.entries(obj||{}).map(([k,v])=>`<div class="kv"><span>${k.replaceAll('_',' ')}</span><strong class="mono">${typeof v==='number'?fmtN(v):v}${units[k]||''}</strong></div>`).join('')}</div>`}
-function renderPanels(data){const ind=data.dashboard.indicators||{}, tech=data.dashboard.technical||{}, sim=data.dashboard.simplified||{};$('gaugeFill').style.width=Math.max(0,Math.min(100,Number(ind.aproveitamento_solar_pct||0)))+'%';$('aprov').textContent=fmtP(ind.aproveitamento_solar_pct);$('simplePanel').innerHTML=`<div class="metric"><strong>${sim.headline||''}</strong><div class="small">${sim.status_text||''}</div><div class="small" style="margin-top:8px">${sim.daily_report||''}</div></div>`;$('techGroups').innerHTML=[groupBlock('Entrada DC',tech.dc_input,{mppt1_voltage_v:' V',mppt1_current_a:' A',mppt1_power_kw:' kW',mppt2_voltage_v:' V',mppt2_current_a:' A',mppt2_power_kw:' kW',dc_power_kw:' kW'}),groupBlock('Saída AC',tech.ac_output,{voltage_v:' V',current_a:' A',power_kw:' kW',frequency_hz:' Hz',power_factor:''}),groupBlock('Rede elétrica',tech.grid,{grid_voltage_v:' V',grid_current_a:' A',frequency_hz:' Hz',active_power_kw:' kW',apparent_power_kva:' kVA'}),groupBlock('Inversor',tech.inverter,{temperature_c:' °C',efficiency_percent:' %'}),groupBlock('Energia e produção',tech.energy,{today_kwh:' kWh',total_kwh:' kWh',import_kwh:' kWh',export_kwh:' kWh',peak_power_kw:' kW',generation_duration_h:' h'}),groupBlock('Comunicação e diagnóstico',tech.diagnostics,{status_code:''}),groupBlock('Condição solar',tech.irradiance,{irradiance_wm2:' W/m²'})].join('');$('simplePanel').className=mode==='simple'?'':'hidden';$('techPanel').className=mode==='tech'?'':'hidden';$('modeBadge').textContent=mode==='simple'?'Modo simplificado':'Modo técnico'}
-function applyDashboard(data){window.__lastData=data;const ind=data.dashboard.indicators||{}, profile=data.dashboard.profile||{}, reports=data.dashboard.reports||{}, compare=data.dashboard.compare||{}, status=data.dashboard.status||{};$('headline').textContent=data.dashboard.simplified?.headline||ind.status_text||'CleanSun';$('subline').textContent=status.status_text||ind.status_text||'Aguardando dados.';$('installName').textContent=data.config?.nome_instalacao||'Residência';$('ecoDia').textContent='R$ '+fmtN(ind.economia_diaria_rs);$('ecoMes').textContent='Mês: R$ '+fmtN(ind.economia_mensal_rs)+' · Ano: R$ '+fmtN(ind.economia_anual_rs);$('autoCons').textContent=fmtP(ind.autoconsumo_pct);$('autoSuf').textContent='Autossuficiência: '+fmtP(ind.autossuficiencia_pct);$('exportada').textContent=fmtN(ind.exportado_kwh)+' kWh';$('importada').textContent='Importada: '+fmtN(ind.importado_kwh)+' kWh';$('diffExp').textContent=fmtP(ind.diferenca_geracao_pct);$('weather').textContent='Clima: '+(ind.weather_label||'--');renderAlerts(data.dashboard.alerts);renderReports(reports);renderMessages(data.dashboard.simplified||{});renderRecs(profile);renderHourBars(ind.hourly);renderWeekBars(data.history_filtered||data.dashboard.history?.daily||[]);renderCompare(compare);renderPanels(data)}
-async function loadDashboard(){try{const r=await fetch(`/api/dashboard?days=${days}&bucket=daily`);applyDashboard(await r.json());$('conn').textContent='Atualizado via API';}catch(e){$('conn').textContent='Falha local';}}
-function setMode(next){mode=next;document.querySelectorAll('.mode-toggle .btn').forEach(b=>b.classList.remove('active'));$(next==='simple'?'btnSimple':'btnTech').classList.add('active');renderPanels(window.__lastData||{dashboard:{indicators:{},technical:{},simplified:{}}})}
-$('btnSimple').onclick=()=>setMode('simple');$('btnTech').onclick=()=>setMode('tech');document.querySelectorAll('[data-days]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-days]').forEach(x=>x.classList.remove('active'));b.classList.add('active');days=Number(b.dataset.days);loadDashboard()});document.querySelectorAll('[data-sev]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-sev]').forEach(x=>x.classList.remove('active'));b.classList.add('active');sev=b.dataset.sev;renderAlerts(window.__lastData?.dashboard?.alerts||[])});
-function connect(){if(!window.EventSource){loadDashboard();return setInterval(loadDashboard,5000)}const es=new EventSource('/api/events');es.onopen=()=>$('conn').textContent='Tempo real (SSE)';es.addEventListener('update',ev=>{applyDashboard(JSON.parse(ev.data));$('conn').textContent='Tempo real (SSE)'});es.onerror=()=>{$('conn').textContent='SSE indisponível, usando polling';es.close();loadDashboard();setInterval(loadDashboard,5000)}}connect();
-</script></body></html>
+const $=id=>document.getElementById(id);
+const fmtN=v=>Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtP=v=>Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})+'%';
+const sevClass=s=>s==='critico'?'critico':s==='atencao'?'atencao':'informativo';
+
+function groupBlock(title,obj,units={}){
+  return `<div class="tech-card"><h4>${title}</h4>${Object.entries(obj||{}).map(([k,v])=>`<div class="kv"><span>${k.replaceAll('_',' ')}</span><strong>${typeof v==='number'?fmtN(v):v}${units[k]||''}</strong></div>`).join('')}</div>`;
+}
+
+function renderAlerts(items){
+  const filtered=(items||[]).filter(a=>sev==='all'||a.severity===sev);
+  $('alerts').innerHTML=filtered.map(a=>`<div class="item ${sevClass(a.severity)}"><div class="dot"></div><div><strong>${a.user_message||a.title}</strong><small>${a.title} · ${a.recommended_action}</small></div></div>`).join('')||'<div class="item informativo"><div class="dot"></div><div><strong>Nenhum alerta relevante no momento.</strong><small>A instalação segue em operação monitorada.</small></div></div>';
+}
+
+function renderReports(r){
+  $('reports').innerHTML=`<div class="item informativo"><div class="dot"></div><div><strong>${r.daily||'Sem resumo diário.'}</strong></div></div><div class="item informativo"><div class="dot"></div><div><strong>${r.weekly||'Sem resumo semanal.'}</strong></div></div>`;
+}
+
+function renderRecs(profile){
+  $('recs').innerHTML=(profile.recommendations||[]).map(text=>`<div class="item informativo"><div class="dot"></div><div><strong>${text}</strong></div></div>`).join('');
+}
+
+function renderMessages(simple){
+  const text=(simple.messages||[]).slice(0,2).join(' ');
+  $('messages').textContent=text||'Aguardando interpretação simplificada.';
+}
+
+function renderHourChart(hourly){
+  const pointsGen=[],pointsLoad=[],genVals=[],loadVals=[];
+  for(let i=0;i<24;i++){
+    const item=hourly?.[String(i)]||hourly?.[i]||{generation_w:0,consumption_w:0};
+    genVals.push(Number(item.generation_w||0)/1000);
+    loadVals.push(Number(item.consumption_w||0)/1000);
+  }
+  const max=Math.max(0.5,...genVals,...loadVals);
+  for(let i=0;i<24;i++){
+    const x=i*(100/23), genY=100-(genVals[i]/max*100), loadY=100-(loadVals[i]/max*100);
+    pointsGen.push(`${x.toFixed(2)},${genY.toFixed(2)}`);
+    pointsLoad.push(`${x.toFixed(2)},${loadY.toFixed(2)}`);
+  }
+  $('genLine').setAttribute('points',pointsGen.join(' '));
+  $('loadLine').setAttribute('points',pointsLoad.join(' '));
+  $('axisX').innerHTML=[0,4,8,12,16,20,23].map(h=>`<span>${h}h</span>`).join('');
+  $('axisY').innerHTML=[max,max*0.75,max*0.5,max*0.25,0].map(v=>`<span>${fmtN(v)}</span>`).join('');
+}
+
+function renderWeekBars(rows){
+  const vals=(rows||[]).slice(-7);
+  const max=Math.max(0.5,...vals.map(v=>Math.max(Number(v.geracao_kwh||0),Number(v.consumo_kwh||0))));
+  $('weekBars').innerHTML=vals.map(v=>{
+    const g=Math.max(8,Number(v.geracao_kwh||0)/max*100);
+    const c=Math.max(8,Number(v.consumo_kwh||0)/max*100);
+    return `<div class="bar-col"><div class="bar-stack"><div class="bar" style="height:${g}%"></div><div class="bar blue" style="height:${c}%"></div></div><span>${v.label||''}</span></div>`;
+  }).join('');
+}
+
+function renderTechnical(tech){
+  $('techGroups').innerHTML=[
+    groupBlock('Entrada DC',tech.dc_input,{mppt1_voltage_v:' V',mppt1_current_a:' A',mppt1_power_kw:' kW',mppt2_voltage_v:' V',mppt2_current_a:' A',mppt2_power_kw:' kW',dc_power_kw:' kW'}),
+    groupBlock('Saída AC',tech.ac_output,{voltage_v:' V',current_a:' A',power_kw:' kW',frequency_hz:' Hz'}),
+    groupBlock('Rede elétrica',tech.grid,{grid_voltage_v:' V',grid_current_a:' A',frequency_hz:' Hz',active_power_kw:' kW',apparent_power_kva:' kVA'}),
+    groupBlock('Inversor',tech.inverter,{temperature_c:' °C',efficiency_percent:' %'}),
+    groupBlock('Energia',tech.energy,{today_kwh:' kWh',total_kwh:' kWh',import_kwh:' kWh',export_kwh:' kWh',peak_power_kw:' kW',generation_duration_h:' h'}),
+    groupBlock('Diagnóstico',tech.diagnostics,{}),
+    groupBlock('Condição solar',tech.irradiance,{irradiance_wm2:' W/m²'})
+  ].join('');
+}
+
+function applyDashboard(data){
+  window.__lastData=data;
+  const dashboard=data.dashboard||{}, ind=dashboard.indicators||{}, reports=dashboard.reports||{}, simple=dashboard.simplified||{}, profile=dashboard.profile||{}, compare=dashboard.compare||{}, status=dashboard.status||{}, tech=dashboard.technical||{};
+  $('installName').textContent=data.config?.nome_instalacao||'Residência';
+  $('headline').textContent=simple.headline||ind.status_text||'Sem dados';
+  $('subline').textContent=status.status_text||ind.status_text||'Aguardando dados.';
+  $('weather').textContent='Clima: '+(ind.weather_label||'--');
+  $('geracaoDia').textContent=fmtN(ind.geracao_kwh)+' kWh';
+  $('ecoDia').textContent=fmtN(ind.economia_diaria_rs);
+  $('ecoMes').textContent='R$ '+fmtN(ind.economia_mensal_rs);
+  $('ecoAno').textContent='R$ '+fmtN(ind.economia_anual_rs);
+  $('exportada').textContent=fmtN(ind.exportado_kwh)+' kWh';
+  $('importada').textContent=fmtN(ind.importado_kwh)+' kWh importados';
+  $('pvNow').textContent=fmtN(ind.potencia_atual_kw)+' kW';
+  $('loadNow').textContent=fmtN(ind.consumo_atual_kw)+' kW';
+  $('gridNow').textContent=(ind.importacao_atual_kw>0?'+':'-')+fmtN(Math.max(ind.importacao_atual_kw,ind.exportacao_atual_kw))+' kW';
+  $('autoCons').textContent=fmtP(ind.autoconsumo_pct);
+  $('autoSuf').textContent=fmtP(ind.autossuficiencia_pct);
+  $('prodMes').textContent='Mês: '+fmtN(compare.month_vs_previous?.current_kwh)+' kWh';
+  $('redeMes').textContent='Rede: '+fmtN(ind.importado_kwh)+' kWh';
+  $('gauge').style.setProperty('--gauge',Math.max(0,Math.min(100,Number(ind.autoconsumo_pct||0)))+'%');
+  $('prValue').textContent=fmtN(ind.performance_ratio);
+  $('diffExp').textContent=fmtP(ind.diferenca_geracao_pct);
+  $('prStatus').textContent=simple.status_text||ind.status_text||'Sem interpretação';
+  $('dailyReportMini').textContent=(reports.daily||'--').slice(0,42)+(reports.daily&&reports.daily.length>42?'...':'');
+  $('statusState').textContent=status.operational_state||'--';
+  $('alarmCount').textContent=String(status.active_alarm_count||0);
+  $('updatedAt').textContent=new Date((status.updated_at||data.updated_at||0)*1000).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  renderMessages(simple);
+  renderAlerts(dashboard.alerts||[]);
+  renderReports(reports);
+  renderRecs(profile);
+  renderHourChart(ind.hourly||{});
+  renderWeekBars(data.history_filtered||dashboard.history?.daily||[]);
+  renderTechnical(tech);
+}
+
+async function loadDashboard(){
+  try{
+    const r=await fetch(`/api/dashboard?days=${days}&bucket=daily`);
+    applyDashboard(await r.json());
+    $('conn').textContent='Sistema online';
+  }catch(e){
+    $('conn').textContent='Falha local';
+  }
+}
+
+function setMode(next){
+  mode=next;
+  document.querySelectorAll('#btnSimple,#btnTech').forEach(b=>b.classList.remove('active'));
+  $(next==='simple'?'btnSimple':'btnTech').classList.add('active');
+  $('techPanel').classList.toggle('hidden',mode!=='tech');
+  $('modeBadge').textContent=mode==='simple'?'Modo simplificado':'Modo técnico';
+}
+
+document.querySelectorAll('[data-days]').forEach(btn=>btn.onclick=()=>{
+  document.querySelectorAll('[data-days]').forEach(x=>x.classList.remove('active'));
+  btn.classList.add('active');
+  days=Number(btn.dataset.days);
+  loadDashboard();
+});
+
+document.querySelectorAll('[data-sev]').forEach(btn=>btn.onclick=()=>{
+  document.querySelectorAll('[data-sev]').forEach(x=>x.classList.remove('active'));
+  btn.classList.add('active');
+  sev=btn.dataset.sev;
+  renderAlerts(window.__lastData?.dashboard?.alerts||[]);
+});
+
+$('btnSimple').onclick=()=>setMode('simple');
+$('btnTech').onclick=()=>setMode('tech');
+setMode('simple');
+
+function connect(){
+  if(!window.EventSource){loadDashboard();return setInterval(loadDashboard,5000)}
+  const es=new EventSource('/api/events');
+  es.onopen=()=>{$('conn').textContent='Sistema online'};
+  es.addEventListener('update',ev=>{applyDashboard(JSON.parse(ev.data));$('conn').textContent='Sistema online'});
+  es.onerror=()=>{$('conn').textContent='SSE indisponível';es.close();loadDashboard();setInterval(loadDashboard,5000)};
+}
+connect();
+</script>
+</body>
+</html>

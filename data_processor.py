@@ -135,6 +135,7 @@ class DataProcessor:
             "exportacao_atual_kw": round(export_kw, 2),
             "geracao_esperada_kw": round(expected_kw, 2),
             "diferenca_geracao_pct": round(diff_pct, 1),
+            "weather_label": snapshot.get("weather_label", "não informado"),
             "performance_ratio": round(performance_ratio, 2),
             "pico_geracao_kw": round(max(peak["generation_kw"], ac_kw), 2),
             "pico_consumo_kw": round(max(peak["consumption_kw"], load_kw), 2),

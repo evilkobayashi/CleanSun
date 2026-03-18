@@ -5,5 +5,8 @@
   "history_max_bytes": 524288,
   "projection_factor_year": 30,
   "alert_generation_gap_pct": 15,
-  "alert_night_import_kw": 1.2
+  "alert_night_import_kw": 1.2,
+  "data_stale_seconds": 20,
+  "simulation_anomalies_enabled": true,
+  "simulation_random_fault_rate": 0.04
 }

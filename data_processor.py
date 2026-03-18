@@ -3,6 +3,8 @@ import json
 import os
 import time
 
+from alarms import AlarmEngine, SEVERITY_ORDER
+
 DEFAULT_CONFIG = {
     "tarifa_kwh": 0.92,
     "potencia_sistema_kwp": 5.0,
@@ -11,6 +13,9 @@ DEFAULT_CONFIG = {
     "projection_factor_year": 30,
     "alert_generation_gap_pct": 15,
     "alert_night_import_kw": 1.2,
+    "data_stale_seconds": 20,
+    "simulation_anomalies_enabled": True,
+    "simulation_random_fault_rate": 0.04,
 }
 
 HISTORY_HEADER = "timestamp,geracao_kwh,consumo_kwh,exportado_kwh,solar_generation_kwh,house_consumption_kwh,grid_import_kwh,grid_export_kwh,self_consumption_kwh,estimated_savings_brl,weather_condition,expected_generation_kwh\n"
@@ -22,6 +27,7 @@ class DataProcessor:
         self.config_path = config_path
         self.history_path = history_path
         self.config = self._load_config()
+        self.alarm_engine = AlarmEngine(self.config)
         self.last_snapshot = {}
         self.last_dashboard = self._blank_dashboard()
         self.last_update_ts = 0
@@ -64,6 +70,7 @@ class DataProcessor:
             "simplified": {},
             "history": {"daily": [], "weekly": [], "monthly": []},
             "status": {},
+            "diagnostics": {},
         }
 
     def register_fault(self, title, detail=""):
@@ -77,10 +84,11 @@ class DataProcessor:
         technical = self._build_technical(snapshot, indicators)
         self._update_hourly_history(indicators, technical, ts)
         history_rows = self.history_last_days(35)
-        alerts = self._build_alerts(snapshot, indicators, technical, history_rows, ts)
-        reports = self._build_reports(indicators, history_rows)
+        alerts = self.alarm_engine.evaluate(snapshot, indicators, technical, history_rows, ts, fault=self.fault, updated_at=self.last_update_ts)
+        reports = self._build_reports(indicators, history_rows, alerts)
         compare = self._build_compare(history_rows)
-        profile = self._build_profile(history_rows)
+        profile = self._build_profile(history_rows, alerts)
+        diagnostics = self.alarm_engine.diagnostics(snapshot, indicators, technical, alerts, self.last_update_ts, fault=self.fault)
         self.last_dashboard = {
             "indicators": indicators,
             "alerts": alerts,
@@ -91,13 +99,13 @@ class DataProcessor:
             "simplified": self._build_simplified(indicators, alerts, reports, profile),
             "history": self._history_views(history_rows),
             "status": self._build_status(snapshot, indicators, alerts, ts),
+            "diagnostics": diagnostics,
         }
 
     def _compute_indicators(self, snapshot):
         generation = max(float(snapshot.get("daily_gen_kwh", 0.0)), 0.0)
         load_kw = max(float(snapshot.get("load_power_w", 0.0)) / 1000.0, 0.0)
         ac_kw = max(float(snapshot.get("ac_power_w", snapshot.get("instant_total_w", 0.0))) / 1000.0, 0.0)
-        dc_kw = max(float(snapshot.get("dc_power_w", snapshot.get("instant_total_w", 0.0))) / 1000.0, 0.0)
         import_kw = max(float(snapshot.get("import_power_w", 0.0)) / 1000.0, 0.0)
         export_kw = max(float(snapshot.get("export_power_w", 0.0)) / 1000.0, 0.0)
         expected_kw = max(float(snapshot.get("expected_generation_w", 0.0)) / 1000.0, 0.0)
@@ -113,7 +121,7 @@ class DataProcessor:
         diff_pct = ((ac_kw - expected_kw) / expected_kw * 100.0) if expected_kw > 0 else 0.0
         economy_daily = consumo_dia * float(self.config.get("tarifa_kwh", 0.92))
         history_rows = self.history_last_days(35)
-        weekly = self._sum_rows(history_rows[-7 * 24 :])
+        weekly = self._sum_rows(history_rows[-7 * 24:])
         monthly = self._sum_period(history_rows, "month")
         yearly = self._sum_period(history_rows, "year")
         peak = self._peak_from_rows(history_rows)
@@ -217,101 +225,46 @@ class DataProcessor:
                 "grid_status": snapshot.get("grid_status", "Desconhecido"),
                 "operational_status": snapshot.get("inverter_status", "Desconhecido"),
                 "status_code": snapshot.get("status_code", -1),
+                "fault_title": self.fault.get("title") if self.fault else "",
             },
         }
 
-    def _add_alarm(self, alarms, code, severity, title, technical_description, user_message, recommended_action, ts, active=True):
-        alarms.append({
-            "code": code,
-            "severity": severity,
-            "title": title,
-            "technical_description": technical_description,
-            "user_message": user_message,
-            "recommended_action": recommended_action,
-            "timestamp": ts,
-            "active": active,
-        })
-
-    def _build_alerts(self, snapshot, indicators, technical, history_rows, ts):
-        alarms = []
-        dc = technical["dc_input"]
-        ac = technical["ac_output"]
-        grid = technical["grid"]
-        inverter = technical["inverter"]
-        energy = technical["energy"]
-        diag = technical["diagnostics"]
-
-        if indicators["diferenca_geracao_pct"] <= -float(self.config.get("alert_generation_gap_pct", 15)):
-            self._add_alarm(alarms, "GEN_LOW", "atencao", "Geração abaixo do esperado", "Geração real abaixo da curva estimada para o horário.", "O sistema está gerando menos energia do que o esperado neste momento.", "Verificar sombreamento, sujeira nos módulos ou condições climáticas.", ts)
-        if dc["mppt1_voltage_v"] < 180 or dc["mppt2_voltage_v"] < 180:
-            self._add_alarm(alarms, "DC_LOW_VOLT", "atencao", "Tensão DC baixa", "Uma das entradas DC está abaixo da faixa típica de operação.", "Uma das strings solares pode estar com tensão abaixo do ideal.", "Verificar string, conectores e possível sombreamento excessivo.", ts)
-        if (dc["mppt1_current_a"] < 0.4 and indicators["geracao_esperada_kw"] > 0.8) or (dc["mppt2_current_a"] < 0.4 and indicators["geracao_esperada_kw"] > 0.8):
-            self._add_alarm(alarms, "DC_CURR_ABN", "atencao", "Corrente DC anormal", "Corrente de entrada DC muito baixa em relação ao horário e irradiância estimada.", "O sistema solar não está puxando corrente como deveria.", "Verificar string, cabos DC, fusíveis e sombreamento.", ts)
-        if grid["grid_voltage_v"] and (grid["grid_voltage_v"] < 195 or grid["grid_voltage_v"] > 245):
-            self._add_alarm(alarms, "AC_VOLT_OUT", "critico", "Tensão AC fora da faixa", "A tensão da rede está fora da faixa operacional esperada.", "A rede elétrica está com tensão inadequada para operação ideal do inversor.", "Verificar a instalação e, se persistir, acionar a concessionária.", ts)
-        if grid["frequency_hz"] and abs(grid["frequency_hz"] - 60.0) > 0.3:
-            self._add_alarm(alarms, "GRID_FREQ", "atencao", "Frequência da rede fora da faixa", "A frequência medida está fora da faixa usual de 60 Hz.", "A rede pode estar instável neste momento.", "Acompanhar a estabilidade da rede e verificar se o evento persiste.", ts)
-        if diag["communication_status"] != "Online" or self.fault is not None:
-            self._add_alarm(alarms, "COMM_FAIL", "critico", "Falha de comunicação", "Não houve atualização confiável dos dados ou a comunicação foi perdida.", "Os dados podem estar desatualizados porque o sistema perdeu comunicação.", "Verificar módulo Wi-Fi, cabo serial e alimentação do módulo.", ts)
-        if inverter["status"] in ("Falha", "Desconectado"):
-            self._add_alarm(alarms, "INV_FAULT", "critico", "Inversor em falha", "O estado operacional do inversor indica falha, standby indevido ou desconexão.", "O inversor não está operando normalmente.", "Verificar o código de falha e reiniciar o equipamento se seguro.", ts)
-        if inverter["temperature_c"] >= 62:
-            self._add_alarm(alarms, "TEMP_HIGH", "critico", "Temperatura elevada do inversor", "Temperatura interna acima da faixa segura de operação.", "O inversor está aquecido demais.", "Melhorar ventilação, checar obstruções e reduzir exposição térmica se possível.", ts)
-        if inverter["efficiency_percent"] and inverter["efficiency_percent"] < 92.0:
-            self._add_alarm(alarms, "EFF_LOW", "atencao", "Baixa eficiência do inversor", "Diferença excessiva entre potência DC e potência AC do inversor.", "Parte relevante da energia está se perdendo na conversão.", "Verificar aquecimento, cabos, configurações e eventual limitação do inversor.", ts)
-        if (time.localtime(ts).tm_hour >= 19 or time.localtime(ts).tm_hour <= 5) and indicators["importacao_atual_kw"] >= float(self.config.get("alert_night_import_kw", 1.2)):
-            self._add_alarm(alarms, "LOAD_NIGHT", "atencao", "Consumo elevado sem geração solar", "Consumo noturno alto com dependência significativa da rede.", "A residência está puxando muita energia da rede fora do período solar.", "Priorizar cargas pesadas no período de maior geração.", ts)
-        if indicators["importacao_atual_kw"] > max(indicators["potencia_atual_kw"] * 1.2, 1.5):
-            self._add_alarm(alarms, "GRID_IMPORT_HIGH", "atencao", "Importação excessiva da rede", "A potência importada da rede está muito acima da contribuição solar no momento.", "A instalação está consumindo muito mais da concessionária do que do solar.", "Avaliar deslocamento de cargas para o período solar e revisar o perfil de consumo.", ts)
-        if indicators["potencia_atual_kw"] > 2.5 and indicators["exportacao_atual_kw"] < 0.1 and indicators["autoconsumo_pct"] < 30:
-            self._add_alarm(alarms, "LOW_EXPORT", "atencao", "Exportação anormalmente baixa", "Há alta geração, mas a exportação está muito baixa em relação ao esperado.", "Pode haver limitação, consumo instantâneo elevado ou inconsistência de medição.", "Verificar medição, perfil de consumo e eventual limitação de injeção.", ts)
-        if abs(dc["mppt1_power_kw"] - dc["mppt2_power_kw"]) > max(0.7, 0.35 * max(dc["mppt1_power_kw"], dc["mppt2_power_kw"], 0.1)):
-            self._add_alarm(alarms, "MPPT_IMBALANCE", "atencao", "Desbalanceamento entre strings", "Diferença significativa entre a potência dos dois MPPTs/strings.", "Uma das entradas solares está rendendo bem menos que a outra.", "Verificar sombreamento, sujeira, conectores ou defeito em uma string.", ts)
-        if 8 <= time.localtime(ts).tm_hour <= 15 and indicators["geracao_esperada_kw"] > 1.0 and indicators["potencia_atual_kw"] < 0.05:
-            self._add_alarm(alarms, "NO_GEN_DAY", "critico", "Ausência de geração em horário esperado", "O sistema não iniciou geração mesmo em período diurno favorável.", "O sistema deveria estar gerando, mas permanece sem produção.", "Verificar disjuntor, strings, status do inversor e presença de rede.", ts)
-        previous_peak = self._peak_from_rows(history_rows)
-        if previous_peak["generation_kw"] > 0 and indicators["potencia_atual_kw"] < previous_peak["generation_kw"] * 0.35 and indicators["geracao_esperada_kw"] > 1.5:
-            self._add_alarm(alarms, "POWER_DROP", "atencao", "Queda brusca de potência", "A potência atual caiu abruptamente em relação ao comportamento recente.", "A geração caiu rápido demais para o horário atual.", "Investigar nuvens densas, sombreamento súbito ou falha parcial.", ts)
-        if indicators["diferenca_geracao_pct"] < -28:
-            self._add_alarm(alarms, "SOILING_SHADE", "atencao", "Possível sombreamento ou sujeira", "A produção permanece consistentemente abaixo do esperado.", "Pode haver sombreamento ou sujeira reduzindo a produção solar.", "Inspecionar módulos, árvores, antenas e sujeira acumulada.", ts)
-        day_sum = self._sum_period(history_rows, "day")
-        if day_sum["geracao_kwh"] and day_sum["geracao_kwh"] < max(self._daily_average(history_rows) * 0.45, 1.0):
-            self._add_alarm(alarms, "DAY_LOW_ENERGY", "atencao", "Energia diária muito baixa", "A energia acumulada do dia está incompatível com o histórico recente.", "A produção diária está abaixo do padrão da instalação.", "Comparar clima do dia com dias anteriores e inspecionar o sistema.", ts)
-        if grid["grid_status"] == "Indisponível":
-            self._add_alarm(alarms, "GRID_DOWN", "critico", "Rede indisponível", "O inversor detectou ausência de rede e não pode injetar energia.", "A rede elétrica está indisponível ou desconectada.", "Verificar disjuntor geral, rede da concessionária e proteções AC.", ts)
-        if not alarms:
-            self._add_alarm(alarms, "INFO_OK", "informativo", "Operação estável", "Nenhuma condição técnica crítica foi detectada.", "A instalação opera dentro do comportamento esperado.", "Seguir monitorando normalmente.", ts)
-        return alarms
-
-    def _build_reports(self, indicators, history_rows):
-        week = self._sum_rows(history_rows[-7 * 24 :])
+    def _build_reports(self, indicators, history_rows, alerts):
+        week = self._sum_rows(history_rows[-7 * 24:])
+        critical = [a for a in alerts if a["severity"] == "critical"]
         return {
             "daily": "Hoje o sistema gerou {:.2f} kWh, exportou {:.2f} kWh e a economia estimada foi de R$ {:.2f}.".format(indicators["geracao_kwh"], indicators["exportado_kwh"], indicators["economia_diaria_rs"]),
             "weekly": "Na última semana o sistema gerou {:.2f} kWh, com {:.2f} kWh consumidos diretamente e {:.2f} kWh exportados para a rede.".format(week["geracao_kwh"], week["consumo_kwh"], week["exportado_kwh"]),
+            "alerts_focus": critical[0]["title"] if critical else alerts[0]["title"],
         }
 
-    def _build_profile(self, history_rows):
+    def _build_profile(self, history_rows, alerts):
         night_import = 0.0
         for row in history_rows:
-            if time.localtime(row["timestamp"]).tm_hour >= 18 or time.localtime(row["timestamp"]).tm_hour <= 5:
+            hour = time.localtime(row["timestamp"]).tm_hour
+            if hour >= 18 or hour <= 5:
                 night_import += max(row["consumo_kwh"] - max(row["geracao_kwh"] - row["exportado_kwh"], 0.0), 0.0)
         recs = ["Priorize máquinas, ferro e chuveiro em horários com maior geração solar."]
         if night_import > 4:
-            recs.append("Seu perfil de consumo indica maior dependência da rede no período noturno.")
+            recs.append("Seu perfil indica dependência relevante da rede no período noturno.")
+        if any(a["code"] == "POSSIBLE_SOILING" for a in alerts):
+            recs.append("Vale programar inspeção visual e limpeza dos módulos fotovoltaicos.")
         return {"night_import_kwh": round(night_import, 2), "recommendations": recs}
 
     def _build_simplified(self, indicators, alerts, reports, profile):
+        top = alerts[0]
+        important = [a["simplified_message"] for a in alerts[:3]]
         return {
-            "headline": alerts[0]["title"],
+            "headline": top["title"],
             "status_text": indicators["status_text"],
-            "messages": [
+            "messages": important + [
                 "Hoje sua residência aproveitou {:.1f}% da energia produzida pelo sistema solar.".format(indicators["autoconsumo_pct"]),
                 "A economia estimada do dia foi de R$ {:.2f}.".format(indicators["economia_diaria_rs"]),
                 "Seu consumo noturno continua dependente da rede elétrica." if profile["night_import_kwh"] > 1.0 else "A dependência da rede no período noturno está controlada.",
-                "Hoje a geração ficou {:.1f}% abaixo do esperado.".format(abs(indicators["diferenca_geracao_pct"])) if indicators["diferenca_geracao_pct"] < 0 else "A geração está compatível com o esperado para o horário.",
             ],
             "daily_report": reports["daily"],
             "weekly_report": reports["weekly"],
+            "primary_action": top["recommended_action"],
         }
 
     def _build_compare(self, history_rows):
@@ -322,13 +275,17 @@ class DataProcessor:
         }
 
     def _build_status(self, snapshot, indicators, alerts, ts):
+        stale_seconds = max(0, int(time.time()) - int(self.last_update_ts or ts))
         return {
             "operational_state": snapshot.get("inverter_status", "Desconhecido"),
             "communication_status": snapshot.get("communication_status", "Desconhecido"),
             "grid_status": snapshot.get("grid_status", "Desconhecido"),
             "status_text": indicators["status_text"],
             "active_alarm_count": len([a for a in alerts if a["active"]]),
+            "critical_alarm_count": len([a for a in alerts if a["severity"] == "critical"]),
+            "warning_alarm_count": len([a for a in alerts if a["severity"] == "warning"]),
             "updated_at": ts,
+            "stale_seconds": stale_seconds,
         }
 
     def _ensure_history_file(self):
@@ -469,12 +426,6 @@ class DataProcessor:
             peak_cons = max(peak_cons, row["consumo_kwh"])
         return {"generation_kw": peak_gen, "consumption_kw": peak_cons}
 
-    def _daily_average(self, rows):
-        daily = self.history_period(14, "daily")
-        if not daily:
-            return 0.0
-        return sum(item["geracao_kwh"] for item in daily) / len(daily)
-
     def _hourly_curve(self, snapshot):
         pv = max(float(snapshot.get("ac_power_w", snapshot.get("instant_total_w", 0.0))), 0.0)
         load = max(float(snapshot.get("load_power_w", 0.0)), 0.0)
@@ -488,14 +439,32 @@ class DataProcessor:
     def _history_views(self, rows):
         return {"daily": self.history_period(7, "daily"), "weekly": self.history_period(35, "weekly"), "monthly": self.history_period(365, "monthly")}
 
+    def _filter_alerts(self, items, severity=None, category=None, active=None):
+        out = list(items)
+        if severity:
+            out = [a for a in out if a.get("severity") == severity]
+        if category:
+            out = [a for a in out if a.get("category") == category]
+        if active is not None:
+            active_bool = active if isinstance(active, bool) else str(active).lower() in ("1", "true", "yes")
+            out = [a for a in out if bool(a.get("active")) == active_bool]
+        out.sort(key=lambda item: (SEVERITY_ORDER.get(item.get("severity"), 9), item.get("timestamp", 0), item.get("code", "")))
+        return out
+
     def payload(self):
         return {"config": self.config, "snapshot": self.last_snapshot, "dashboard": self.last_dashboard, "updated_at": self.last_update_ts, "fault": self.fault}
 
     def indicators(self):
         return self.last_dashboard.get("indicators", {})
 
-    def alerts(self):
-        return self.last_dashboard.get("alerts", [])
+    def alerts(self, severity=None, category=None, active=None):
+        return self._filter_alerts(self.last_dashboard.get("alerts", []), severity=severity, category=category, active=active)
+
+    def active_alerts(self, severity=None, category=None):
+        return self.alerts(severity=severity, category=category, active=True)
+
+    def alert_history(self, severity=None, category=None):
+        return self._filter_alerts(self.alarm_engine.history, severity=severity, category=category, active=None)
 
     def profile(self):
         return self.last_dashboard.get("profile", {})
@@ -506,8 +475,13 @@ class DataProcessor:
     def technical(self):
         return self.last_dashboard.get("technical", {})
 
+    def diagnostics(self):
+        return self.last_dashboard.get("diagnostics", {})
+
     def status(self):
-        return self.last_dashboard.get("status", {})
+        status = dict(self.last_dashboard.get("status", {}))
+        status["active_alert_codes"] = [a["code"] for a in self.active_alerts()]
+        return status
 
     def summary(self, period="daily"):
         return {"period": period, "text": self.last_dashboard.get("reports", {}).get(period, "Sem dados suficientes.")}

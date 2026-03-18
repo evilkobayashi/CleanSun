@@ -21,11 +21,13 @@ class _FallbackInstrument:
 
     WEATHER_GAIN = {"céu claro": 1.0, "parcialmente nublado": 0.76, "nublado": 0.52}
     STATUS_MAP = {0: "Standby", 1: "Gerando", 2: "Falha", 3: "Desconectado"}
+    RANDOM_SCENARIOS = ["normal", "sombreamento", "sobretensao_rede", "subtensao_rede", "temperatura_alta", "falha_comunicacao", "desbalanceamento_mppt", "sem_geracao_dia", "dc_subtensao", "dc_sobretensao"]
 
-    def __init__(self, weather="parcialmente nublado", kwp=5.0, scenario="normal"):
+    def __init__(self, weather="parcialmente nublado", kwp=5.0, scenario="auto", random_fault_rate=0.04):
         self.weather = weather
         self.kwp = kwp
         self.scenario = scenario
+        self.random_fault_rate = random_fault_rate
         self.daily_kwh = 0.0
         self.total_kwh = 18452.7
         self.peak_power_kw = 0.0
@@ -33,6 +35,8 @@ class _FallbackInstrument:
         self._cache = {}
         self._start_generation_ts = None
         self._end_generation_ts = None
+        self._active_random = "normal"
+        self._random_until_ts = 0
 
     @staticmethod
     def _sun_curve(hour_float):
@@ -49,29 +53,58 @@ class _FallbackInstrument:
             base += 1.20
         return max(0.18, base + random.uniform(-0.08, 0.16))
 
-    def _pick_status(self, generation_kw, grid_available):
-        if self.scenario == "falha_inversor":
+    def _current_scenario(self, now):
+        if self.scenario != "auto":
+            return self.scenario
+        if now >= self._random_until_ts:
+            if random.random() < self.random_fault_rate:
+                self._active_random = random.choice(self.RANDOM_SCENARIOS[1:])
+                self._random_until_ts = now + random.randint(45, 180)
+            else:
+                self._active_random = "normal"
+                self._random_until_ts = now + random.randint(20, 60)
+        return self._active_random
+
+    def _pick_status(self, generation_kw, grid_available, scenario):
+        if scenario in ("falha_inversor",):
             return 2
         if not grid_available:
             return 3 if generation_kw > 0 else 0
         return 1 if generation_kw > 0.05 else 0
 
-    def _scenario_adjustments(self, sun, generation_kw, temp_c, grid_voltage, grid_freq):
-        if self.scenario == "sombreamento":
-            generation_kw *= 0.62
-        elif self.scenario == "sobretensao":
-            grid_voltage = 252 + random.uniform(1, 6)
-        elif self.scenario == "subtensao":
+    def _scenario_adjustments(self, scenario, generation_kw, temp_c, grid_voltage, grid_freq, mppt1_v, mppt2_v, mppt1_kw, mppt2_kw, sun):
+        communication_status = "Online"
+        if scenario == "sombreamento":
+            generation_kw *= 0.58
+            mppt2_kw *= 0.45
+        elif scenario == "sobretensao_rede":
+            grid_voltage = 252 + random.uniform(1, 7)
+        elif scenario == "subtensao_rede":
             grid_voltage = 188 + random.uniform(-4, 4)
-        elif self.scenario == "temperatura_alta":
-            temp_c += 18
-            generation_kw *= 0.94
-        elif self.scenario == "rede_indisponivel":
+        elif scenario == "temperatura_alta":
+            temp_c += 19
+            generation_kw *= 0.93
+        elif scenario == "rede_indisponivel":
             grid_voltage = 0.0
             grid_freq = 0.0
-        elif self.scenario == "falha_comunicacao":
-            temp_c += 0.0
-        return generation_kw, temp_c, grid_voltage, grid_freq
+        elif scenario == "falha_comunicacao":
+            communication_status = "Offline"
+        elif scenario == "desbalanceamento_mppt":
+            mppt1_kw *= 1.08
+            mppt2_kw *= 0.32
+        elif scenario == "sem_geracao_dia" and sun > 0.2:
+            generation_kw = 0.0
+            mppt1_kw = 0.0
+            mppt2_kw = 0.0
+        elif scenario == "dc_subtensao":
+            mppt1_v = 142 + random.uniform(-4, 4)
+            mppt2_v = 150 + random.uniform(-4, 4)
+            generation_kw *= 0.62
+        elif scenario == "dc_sobretensao":
+            mppt1_v = 492 + random.uniform(0, 12)
+            mppt2_v = 486 + random.uniform(0, 12)
+            generation_kw *= 0.20
+        return generation_kw, temp_c, grid_voltage, grid_freq, mppt1_v, mppt2_v, mppt1_kw, mppt2_kw, communication_status
 
     def _tick(self):
         now = time.time()
@@ -81,6 +114,7 @@ class _FallbackInstrument:
         hour_float = lt.tm_hour + lt.tm_min / 60.0
         sun = self._sun_curve(hour_float)
         weather_gain = self.WEATHER_GAIN.get(self.weather, 0.76)
+        scenario = self._current_scenario(now)
         irradiance = int(1000 * sun * weather_gain)
         expected_kw = self.kwp * sun
         generation_kw = max(0.0, expected_kw * weather_gain * (1 + random.uniform(-0.04, 0.04)))
@@ -88,25 +122,19 @@ class _FallbackInstrument:
         temp_c = 26 + 15 * sun + random.uniform(-0.8, 1.2)
         grid_voltage = 220 + random.uniform(-2.5, 2.5)
         grid_freq = 60 + random.uniform(-0.08, 0.08)
-
-        generation_kw, temp_c, grid_voltage, grid_freq = self._scenario_adjustments(sun, generation_kw, temp_c, grid_voltage, grid_freq)
-        grid_available = self.scenario != "rede_indisponivel"
-        if self.scenario == "falha_inversor":
-            generation_kw = 0.0
-
         mppt1_v = max(0.0, 180 + 220 * sun + random.uniform(-4, 4))
         mppt2_v = max(0.0, 176 + 214 * sun + random.uniform(-4, 4))
         split = 0.52 + random.uniform(-0.05, 0.05)
         mppt1_kw = generation_kw * split
         mppt2_kw = max(0.0, generation_kw - mppt1_kw)
-        if self.scenario == "sombreamento":
-            mppt2_kw *= 0.55
-        mppt1_a = (mppt1_kw * 1000 / max(mppt1_v, 1)) if mppt1_v else 0.0
-        mppt2_a = (mppt2_kw * 1000 / max(mppt2_v, 1)) if mppt2_v else 0.0
-        dc_kw = mppt1_kw + mppt2_kw
 
+        generation_kw, temp_c, grid_voltage, grid_freq, mppt1_v, mppt2_v, mppt1_kw, mppt2_kw, communication_status = self._scenario_adjustments(
+            scenario, generation_kw, temp_c, grid_voltage, grid_freq, mppt1_v, mppt2_v, mppt1_kw, mppt2_kw, sun
+        )
+        dc_kw = max(0.0, mppt1_kw + mppt2_kw)
+        grid_available = scenario != "rede_indisponivel"
         efficiency = 95.2 + 1.4 * sun + random.uniform(-0.5, 0.4)
-        if self.scenario == "temperatura_alta":
+        if scenario == "temperatura_alta":
             efficiency -= 3.2
         efficiency = max(88.0, min(efficiency, 98.4))
         ac_kw = dc_kw * efficiency / 100.0 if grid_available else 0.0
@@ -114,13 +142,14 @@ class _FallbackInstrument:
         export_kw = max(0.0, ac_kw - load_kw)
         import_kw = max(0.0, load_kw - ac_kw)
         power_factor = max(0.88, min(0.995, 0.97 + random.uniform(-0.03, 0.01)))
-        apparent_kw = ac_kw / max(power_factor, 0.01)
+        apparent_kw = ac_kw / max(power_factor, 0.01) if ac_kw else 0.0
         grid_current = ((import_kw if import_kw > 0 else export_kw) * 1000 / max(grid_voltage, 1)) if grid_voltage else 0.0
-        active_kw = ac_kw
-        status_code = self._pick_status(ac_kw, grid_available)
+        status_code = self._pick_status(ac_kw, grid_available, scenario)
         inverter_status = self.STATUS_MAP[status_code]
-        communication_status = "Offline" if self.scenario == "falha_comunicacao" else "Online"
         grid_status = "Indisponível" if not grid_available else ("Alarme" if grid_voltage < 195 or grid_voltage > 245 else "Normal")
+
+        mppt1_a = (mppt1_kw * 1000 / max(mppt1_v, 1)) if mppt1_v else 0.0
+        mppt2_a = (mppt2_kw * 1000 / max(mppt2_v, 1)) if mppt2_v else 0.0
 
         if ac_kw > 0.05 and self._start_generation_ts is None:
             self._start_generation_ts = int(now)
@@ -151,6 +180,7 @@ class _FallbackInstrument:
             "irradiance_wm2": irradiance,
             "dc_power_w": int(dc_kw * 1000),
             "ac_power_w": int(ac_kw * 1000),
+            "simulation_scenario": scenario,
             "dc_input": {
                 "mppt1_voltage_v": round(mppt1_v, 1),
                 "mppt1_current_a": round(mppt1_a, 2),
@@ -172,7 +202,7 @@ class _FallbackInstrument:
                 "grid_current_a": round(grid_current, 2),
                 "grid_status": grid_status,
                 "frequency_hz": round(grid_freq, 2),
-                "active_power_kw": round(active_kw, 2),
+                "active_power_kw": round(ac_kw, 2),
                 "apparent_power_kva": round(apparent_kw, 2),
             },
             "inverter": {
@@ -255,6 +285,7 @@ class GrowattModbusReader:
             "irradiance_wm2": 700,
             "dc_power_w": int(pv_kw * 1030),
             "ac_power_w": int(pv_kw * 1000),
+            "simulation_scenario": "hardware",
             "dc_input": {"mppt1_voltage_v": 320.0, "mppt1_current_a": 4.8, "mppt1_power_kw": round(pv_kw / 2, 2), "mppt2_voltage_v": 318.0, "mppt2_current_a": 4.7, "mppt2_power_kw": round(pv_kw / 2, 2), "dc_power_kw": round(pv_kw * 1.03, 2)},
             "ac_output": {"voltage_v": 220.0, "current_a": round(ac_current, 2), "power_kw": round(pv_kw, 2), "frequency_hz": 60.0, "power_factor": 0.98},
             "grid": {"grid_voltage_v": 220.0, "grid_current_a": round(ac_current, 2), "grid_status": "Normal", "frequency_hz": 60.0, "active_power_kw": round(pv_kw, 2), "apparent_power_kva": round(pv_kw / 0.98, 2)},

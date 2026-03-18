@@ -1,62 +1,68 @@
-"""Growatt Modbus TCP simulator for CleanSun tests.
-
-Implements a minimal subset of Modbus function 0x03.
-"""
+"""Simulador local de geração/consumo residencial e servidor Modbus TCP."""
+import argparse
 import math
 import random
 import socket
 import struct
 import time
 
-REGS = {
-    0x0001: 1,
-    0x0003: 0,
-    0x0005: 0,
-    0x0006: 0,
-    0x003C: 0,
-    0x0055: 25000,
-    0x007D: 250,
-    0x0100: 0,
-}
+REGS = {0x0001: 0, 0x0003: 0, 0x0006: 0, 0x003B: 21500}
 
 
 class CurveModel:
-    WEATHER_GAIN = {"ensolarado": 1.0, "nublado": 0.58, "chuvoso": 0.25}
+    WEATHER_GAIN = {
+        "ceu_claro": 1.0,
+        "parcialmente_nublado": 0.74,
+        "nublado": 0.5,
+    }
 
-    def __init__(self, weather="ensolarado", kwp=5.0):
+    def __init__(self, weather="parcialmente_nublado", kwp=5.0):
         self.weather = weather
         self.kwp = kwp
         self.daily_kwh = 0.0
+        self.total_kwh = 2150.0
+        self.last = time.time()
+
+    def _sun(self, hour_float):
+        return max(0.0, math.sin((hour_float - 6) / 12 * math.pi))
+
+    def _load(self, hour_float):
+        base = 0.42
+        if 6 <= hour_float <= 8:
+            base += 0.45
+        if 12 <= hour_float <= 13.5:
+            base += 0.22
+        if 18 <= hour_float <= 22.5:
+            base += 1.15
+        return max(0.2, base + random.uniform(-0.12, 0.18))
 
     def tick(self):
-        now = time.localtime()
-        h = now.tm_hour + now.tm_min / 60.0
-        sunlight = max(0.0, math.sin((h - 6) / 12 * math.pi))
-        gain = self.WEATHER_GAIN.get(self.weather, 1.0)
-        cloud_noise = random.uniform(-0.06, 0.06)
-        pv_kw = max(0.0, self.kwp * sunlight * (gain + cloud_noise))
-
-        home_load_kw = 0.7 + (0.8 if 18 <= now.tm_hour <= 22 else 0.2)
-        home_load_kw += random.uniform(-0.15, 0.15)
-        home_load_kw = max(0.2, home_load_kw)
-
-        export_kw = max(0.0, pv_kw - home_load_kw)
-        self.daily_kwh += pv_kw * (5 / 3600)
-
-        dc_v = 160 + 240 * sunlight
-        dc_a = (pv_kw * 1000 / max(dc_v, 10))
-        temp_c = 24 + 18 * sunlight + random.uniform(-1.5, 1.5)
-
-        REGS[0x0003] = int(dc_v)
-        REGS[0x0005] = int(dc_a)
-        REGS[0x0006] = int((pv_kw - export_kw) * 1000)
-        REGS[0x003C] = int(self.daily_kwh * 10)
-        REGS[0x0055] += int(max(pv_kw, 0) * 10 / 3600)
-        REGS[0x007D] = int(temp_c * 10)
-        REGS[0x0100] = int(pv_kw * 1000)
+        now = time.time()
+        delta_h = (now - self.last) / 3600.0
+        self.last = now
+        lt = time.localtime(now)
+        hour_float = lt.tm_hour + lt.tm_min / 60.0
+        sun = self._sun(hour_float)
+        pv_kw = max(0.0, self.kwp * sun * (self.WEATHER_GAIN[self.weather] + random.uniform(-0.05, 0.05)))
+        load_kw = self._load(hour_float)
+        export_kw = max(0.0, pv_kw - load_kw)
+        import_kw = max(0.0, load_kw - pv_kw)
+        self.daily_kwh += pv_kw * max(delta_h, 0.0)
+        self.total_kwh += pv_kw * max(delta_h, 0.0)
+        REGS[0x0001] = int(pv_kw * 1000)
+        REGS[0x0003] = int(180 + 220 * sun)
+        REGS[0x0006] = int(self.daily_kwh * 10)
+        REGS[0x003B] = int(self.total_kwh * 10)
+        return {
+            "pv_kw": round(pv_kw, 3),
+            "load_kw": round(load_kw, 3),
+            "import_kw": round(import_kw, 3),
+            "export_kw": round(export_kw, 3),
+            "weather": self.weather,
+        }
 
 
-def serve(host="0.0.0.0", port=1502, weather="ensolarado"):
+def serve(host="0.0.0.0", port=1502, weather="parcialmente_nublado"):
     model = CurveModel(weather=weather)
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -64,9 +70,8 @@ def serve(host="0.0.0.0", port=1502, weather="ensolarado"):
     sock.listen(5)
     sock.settimeout(1)
     print("Simulador Growatt Modbus TCP em {}:{} ({})".format(host, port, weather))
-
     while True:
-        model.tick()
+        snapshot = model.tick()
         try:
             conn, _addr = sock.accept()
         except socket.timeout:
@@ -83,14 +88,13 @@ def serve(host="0.0.0.0", port=1502, weather="ensolarado"):
             pdu = struct.pack(">BBB", unit_id, func, len(data)) + data
             mbap = struct.pack(">HHH", tx_id, 0, len(pdu))
             conn.sendall(mbap + pdu)
+        print("[sim] pv={pv_kw}kW load={load_kw}kW import={import_kw}kW export={export_kw}kW clima={weather}".format(**snapshot))
 
 
 if __name__ == "__main__":
-    import argparse
-
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=1502)
-    parser.add_argument("--weather", default="ensolarado", choices=["ensolarado", "nublado", "chuvoso"])
+    parser.add_argument("--weather", default="parcialmente_nublado", choices=["ceu_claro", "parcialmente_nublado", "nublado"])
     args = parser.parse_args()
     serve(args.host, args.port, args.weather)

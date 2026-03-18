@@ -1,9 +1,10 @@
-"""Servidor HTTP mínimo (uasyncio) para dashboard e API CleanSun."""
+"""Servidor HTTP local do CleanSun com endpoints consolidados."""
 import json
+import sys
 
-try:
+if sys.implementation.name == "micropython":
     import uasyncio as asyncio
-except ImportError:
+else:
     import asyncio
 
 
@@ -23,14 +24,14 @@ class CleanSunHTTPServer:
             return path, {}
         base, raw = path.split("?", 1)
         query = {}
-        for p in raw.split("&"):
-            if not p:
+        for part in raw.split("&"):
+            if not part:
                 continue
-            if "=" in p:
-                k, v = p.split("=", 1)
+            if "=" in part:
+                key, value = part.split("=", 1)
             else:
-                k, v = p, ""
-            query[k] = v
+                key, value = part, ""
+            query[key] = value
         return base, query
 
     async def _handle_client(self, reader, writer):
@@ -38,64 +39,58 @@ class CleanSunHTTPServer:
         if not req:
             await writer.wait_closed()
             return
-
-        req_line = req.decode("utf-8", "ignore")
-        parts = req_line.split(" ")
-        method = parts[0] if len(parts) > 0 else "GET"
+        parts = req.decode("utf-8", "ignore").split(" ")
+        method = parts[0] if parts else "GET"
         path = parts[1] if len(parts) > 1 else "/"
         path, query = self._parse_query(path)
-
         while True:
             header = await reader.readline()
             if not header or header in (b"\r\n", b"\n"):
                 break
-
         if method != "GET":
-            await self._send(writer, "405 Method Not Allowed", "text/plain", "Method not allowed")
+            await self._send(writer, "405 Method Not Allowed", "application/json", json.dumps({"error": "method_not_allowed"}))
             return
+
+        routes = {
+            "/api/data": lambda q: self.processor.payload(),
+            "/api/dashboard": lambda q: self.processor.dashboard(int(q.get("days", "7")), q.get("bucket", "daily")),
+            "/api/indicators": lambda q: self.processor.indicators(),
+            "/api/alerts": lambda q: self.processor.alerts(),
+            "/api/profile": lambda q: self.processor.profile(),
+            "/api/compare": lambda q: self.processor.compare(),
+            "/api/summary/daily": lambda q: self.processor.summary("daily"),
+            "/api/summary/weekly": lambda q: self.processor.summary("weekly"),
+            "/api/history": lambda q: {"days": int(q.get("days", "7")), "bucket": q.get("bucket", "hourly"), "rows": self.processor.history_period(int(q.get("days", "7")), q.get("bucket", "hourly"))},
+            "/api/state": lambda q: self.processor.payload(),
+        }
 
         if path == "/":
             await self._serve_dashboard(writer)
-        elif path == "/api/data" or path == "/api/state":
-            body = json.dumps(self.processor.payload())
-            await self._send(writer, "200 OK", "application/json", body)
-        elif path == "/api/history":
-            days = query.get("days", "7")
-            try:
-                days = int(days)
-            except ValueError:
-                days = 7
-            body = json.dumps({"days": days, "rows": self.processor.history_last_days(days)})
-            await self._send(writer, "200 OK", "application/json", body)
         elif path == "/api/events":
             await self._serve_sse(writer)
+        elif path in routes:
+            await self._send(writer, "200 OK", "application/json", json.dumps(routes[path](query)))
         else:
-            await self._send(writer, "404 Not Found", "text/plain", "rota nao encontrada")
+            await self._send(writer, "404 Not Found", "application/json", json.dumps({"error": "not_found", "path": path}))
 
     async def _serve_dashboard(self, writer):
-        try:
-            with open("dashboard.html", "r", encoding="utf-8") as f:
-                body = f.read()
-            await self._send(writer, "200 OK", "text/html", body)
-        except OSError:
-            await self._send(writer, "404 Not Found", "text/plain", "dashboard.html nao encontrado")
+        with open("dashboard.html", "r", encoding="utf-8") as f:
+            body = f.read()
+        await self._send(writer, "200 OK", "text/html", body)
 
     async def _serve_sse(self, writer):
         headers = (
             "HTTP/1.1 200 OK\r\n"
             "Content-Type: text/event-stream\r\n"
             "Cache-Control: no-cache\r\n"
-            "Connection: keep-alive\r\n"
-            "Access-Control-Allow-Origin: *\r\n\r\n"
+            "Connection: keep-alive\r\n\r\n"
         )
         writer.write(headers.encode("utf-8"))
         await writer.drain()
-
         try:
             while True:
-                payload = json.dumps(self.processor.payload())
-                msg = "event: update\ndata: {data}\n\n".format(data=payload)
-                writer.write(msg.encode("utf-8"))
+                payload = json.dumps(self.processor.dashboard())
+                writer.write(("event: update\ndata: " + payload + "\n\n").encode("utf-8"))
                 await writer.drain()
                 await asyncio.sleep(5)
         except Exception:
@@ -106,14 +101,12 @@ class CleanSunHTTPServer:
     async def _send(self, writer, status, content_type, body):
         if isinstance(body, str):
             body = body.encode("utf-8")
-
         response = (
             "HTTP/1.1 {status}\r\n"
-            "Content-Type: {content_type}; charset=utf-8\r\n"
-            "Content-Length: {size}\r\n"
+            "Content-Type: {ctype}; charset=utf-8\r\n"
+            "Content-Length: {length}\r\n"
             "Connection: close\r\n\r\n"
-        ).format(status=status, content_type=content_type, size=len(body)).encode("utf-8")
-
+        ).format(status=status, ctype=content_type, length=len(body)).encode("utf-8")
         writer.write(response)
         writer.write(body)
         await writer.drain()

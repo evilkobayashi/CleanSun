@@ -1,79 +1,110 @@
 # CleanSun
 
-Sistema embarcado para interpretação simplificada de dados fotovoltaicos no módulo Wi-Fi de inversores Growatt.
+Protótipo funcional de TCC para interpretação simplificada de dados fotovoltaicos de um inversor Growatt, com foco em usuário leigo, operação local e valor acadêmico.
 
-## Arquitetura
+## Visão geral da refatoração
 
-- `main.py`: loop principal (`uasyncio`) e polling Modbus a cada 5s.
-- `modbus_reader.py`: leitura dos registros Growatt via Modbus RTU.
-- `data_processor.py`: cálculo de autoconsumo, excedente, economia, PR e status.
-- `http_server.py`: servidor HTTP local (`/`, `/api/data` e SSE em `/api/events`).
-- `dashboard.html`: SPA HTML/CSS/JS offline (sem CDN), totalmente autocontida (<50KB), com gráfico de barras e gauge em CSS puro.
-- `simulate_growatt.py`: simulador Modbus TCP para testes em PC.
+A arquitetura original foi preservada:
 
-## Registros Growatt lidos
+- `modbus_reader.py` continua responsável pela coleta.
+- `data_processor.py` centraliza todos os cálculos, alertas, relatórios e comparações.
+- `http_server.py` expõe a API local e o dashboard.
+- `main.py` orquestra a execução.
+- `simulate_growatt.py` continua servindo dados simulados mais ricos.
+- `dashboard.html` agora apresenta dois modos: técnico e simplificado.
 
-- `0x0001` potência instantânea (W)
-- `0x0003` tensão DC (V)
-- `0x0006` geração do dia (0.1 kWh)
-- `0x003B` geração total (0.1 kWh)
+## Árvore sugerida
 
-
-## Leitura periódica em memória local
-
-O módulo `modbus_reader.py` implementa `GrowattModbusReader.poll_and_store_forever(interval_seconds=5)`, que lê todos os registros a cada 5 segundos e mantém um buffer circular em RAM (`memory_buffer`), sem banco de dados externo.
-
-## Histórico em CSV circular (flash)
-
-`data_processor.py` mantém `history.csv` em formato horário com colunas `timestamp,geracao_kwh,consumo_kwh,exportado_kwh`, gravando no máximo 512KB (`history_max_bytes=524288`) com rotação circular em flash.
-
-## API HTTP e atualização em tempo real
-
-- `GET /` → retorna `dashboard.html`
-- `GET /api/data` → JSON com dados atuais (`payload()` do processador)
-- `GET /api/events` → stream SSE (`event: update`) para atualização em tempo real sem WebSocket
-- `GET /api/history?days=7` → histórico horário dos últimos N dias
-
-## Flash (ESP32/ESP8266 com MicroPython 1.21+)
-
-1. Apague e grave firmware MicroPython no módulo Shine WiFi-X.
-2. Copie os arquivos:
-   - `main.py`
-   - `modbus_reader.py`
-   - `data_processor.py`
-   - `http_server.py`
-   - `dashboard.html`
-   - `config.json`
-   - `history.csv`
-3. Reinicie o módulo.
-4. Conecte no mesmo Wi-Fi local e acesse `http://cleansun.local` ou IP do módulo.
-
-Exemplo com `mpremote`:
-
-```bash
-mpremote connect /dev/ttyUSB0 fs cp main.py :main.py
-mpremote connect /dev/ttyUSB0 fs cp modbus_reader.py :modbus_reader.py
-mpremote connect /dev/ttyUSB0 fs cp data_processor.py :data_processor.py
-mpremote connect /dev/ttyUSB0 fs cp http_server.py :http_server.py
-mpremote connect /dev/ttyUSB0 fs cp dashboard.html :dashboard.html
-mpremote connect /dev/ttyUSB0 fs cp config.json :config.json
-mpremote connect /dev/ttyUSB0 fs cp history.csv :history.csv
-mpremote connect /dev/ttyUSB0 reset
+```text
+CleanSun/
+├── main.py
+├── modbus_reader.py
+├── data_processor.py
+├── http_server.py
+├── simulate_growatt.py
+├── dashboard.html
+├── config.json
+├── history.csv
+└── README.md
 ```
 
-## Simulação sem hardware
+## Melhorias implementadas
 
-```bash
-python3 simulate_growatt.py --weather ensolarado --port 1502
+### Backend / processamento
+
+- Indicadores energéticos completos:
+  - autoconsumo
+  - autossuficiência
+  - energia importada/exportada
+  - economia diária, semanal, mensal e anual
+  - projeção financeira
+  - pico de geração e pico de consumo
+  - taxa de aproveitamento solar
+- Comparação entre geração real e esperada.
+- Alertas automáticos com severidade.
+- Relatórios automáticos diário e semanal.
+- Comparações entre hoje/ontem, semana atual/anterior e mês atual/anterior.
+- Perfil de consumo residencial com recomendações.
+- Endpoints adicionados:
+  - `/api/dashboard`
+  - `/api/history`
+  - `/api/summary/daily`
+  - `/api/summary/weekly`
+  - `/api/indicators`
+  - `/api/alerts`
+  - `/api/profile`
+  - `/api/compare`
+  - `/api/data`
+  - `/api/events`
+
+### Dashboard / UX
+
+- Modo simplificado para usuário leigo.
+- Modo técnico para apresentação acadêmica e engenharia.
+- Cartões focados em economia e compreensão.
+- Alertas em destaque.
+- Relatórios textuais em linguagem natural.
+- Filtros de período (hoje, 7 dias, 30 dias).
+- Visualização de comparação entre períodos.
+- Histórico semanal e curva horária.
+
+### Simulação
+
+- Geração solar coerente com horário do dia.
+- Consumo residencial variável.
+- Importação/exportação estimadas.
+- Cenários de clima:
+  - `ceu_claro`
+  - `parcialmente_nublado`
+  - `nublado`
+
+## Execução no PowerShell
+
+### 1. Rodar o simulador
+
+```powershell
+python .\simulate_growatt.py --weather parcialmente_nublado --port 1502
 ```
 
-O simulador responde função Modbus `0x03` com curva solar diária (pico ao meio-dia), variação de clima e carga residencial típica.
+### 2. Rodar o servidor/dashboard local
 
-## Restrições de projeto
+```powershell
+python .\main.py
+```
 
-- Operação totalmente offline (LAN local).
-- Sem app móvel e sem nuvem.
-- Dashboard autocontido e leve (<50KB).
+### 3. Abrir o dashboard
 
+No navegador:
 
-- Dashboard otimizado para carregamento alvo <1s em rede local e legibilidade mobile (fonte base 16px).
+```text
+http://127.0.0.1/
+```
+
+Se estiver rodando em desktop com porta alternativa num teste manual, abra a porta correspondente.
+
+## Observações de uso
+
+- O sistema degrada graciosamente quando não há dados suficientes.
+- O fallback local do leitor Modbus gera dados coerentes mesmo sem hardware.
+- O histórico segue em CSV rotativo, sem banco de dados externo.
+- O dashboard foi mantido simples para rodar localmente como protótipo funcional de TCC.

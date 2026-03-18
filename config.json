@@ -1,21 +1,9 @@
 {
   "tarifa_kwh": 0.92,
   "potencia_sistema_kwp": 5.0,
-  "nome_instalacao": "Residencia",
-  "expected_irradiance": {
-    "6": 0.1,
-    "7": 0.2,
-    "8": 0.35,
-    "9": 0.55,
-    "10": 0.7,
-    "11": 0.85,
-    "12": 0.95,
-    "13": 0.9,
-    "14": 0.8,
-    "15": 0.6,
-    "16": 0.4,
-    "17": 0.2
-  },
-  "max_history_rows": 576,
-  "history_max_bytes": 524288
+  "nome_instalacao": "Residência TCC",
+  "history_max_bytes": 524288,
+  "projection_factor_year": 30,
+  "alert_generation_gap_pct": 15,
+  "alert_night_import_kw": 1.2
 }

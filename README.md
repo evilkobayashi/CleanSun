@@ -108,3 +108,34 @@ Se estiver rodando em desktop com porta alternativa num teste manual, abra a por
 - O fallback local do leitor Modbus gera dados coerentes mesmo sem hardware.
 - O histórico segue em CSV rotativo, sem banco de dados externo.
 - O dashboard foi mantido simples para rodar localmente como protótipo funcional de TCC.
+
+
+## Simulador retroativo (`simulate_growatt.py`)
+
+O simulador agora pode preencher automaticamente o `history.csv` com histórico retroativo realista usando resolução de 15 minutos, clima diário simplificado e continuidade opcional após a carga inicial.
+
+### Exemplos no PowerShell
+
+Gerar 7 dias e encerrar:
+
+```powershell
+python .\simulate_growatt.py --days 7 --overwrite
+```
+
+Gerar 30 dias e continuar em modo contínuo:
+
+```powershell
+python .\simulate_growatt.py --days 30 --continuous
+```
+
+Gerar 90 dias sobrescrevendo o histórico anterior:
+
+```powershell
+python .\simulate_growatt.py --days 90 --overwrite
+```
+
+Usar intervalo diferente e tarifa específica:
+
+```powershell
+python .\simulate_growatt.py --days 30 --interval-minutes 10 --tariff 0.95
+```

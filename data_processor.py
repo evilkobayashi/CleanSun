@@ -13,7 +13,7 @@ DEFAULT_CONFIG = {
     "alert_night_import_kw": 1.2,
 }
 
-HISTORY_HEADER = "timestamp,geracao_kwh,consumo_kwh,exportado_kwh\n"
+HISTORY_HEADER = "timestamp,geracao_kwh,consumo_kwh,exportado_kwh,solar_generation_kwh,house_consumption_kwh,grid_import_kwh,grid_export_kwh,self_consumption_kwh,estimated_savings_brl,weather_condition,expected_generation_kwh\n"
 WEEKDAYS = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sab", "Dom"]
 MONTHS = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
 
@@ -304,7 +304,7 @@ class DataProcessor:
             return
         with open(self.history_path, "r", encoding="utf-8") as f:
             head = f.readline()
-        if head.strip() != HISTORY_HEADER.strip():
+        if not head.startswith("timestamp,"):
             with open(self.history_path, "w", encoding="utf-8") as f:
                 f.write(HISTORY_HEADER)
 
@@ -326,7 +326,11 @@ class DataProcessor:
             self._hour_state["last_ts"] = ts
 
     def _append_history_row(self, timestamp, geracao_kwh, consumo_kwh, exportado_kwh):
-        line = "{},{:.3f},{:.3f},{:.3f}\n".format(int(timestamp), geracao_kwh, consumo_kwh, exportado_kwh)
+        importado = max(consumo_kwh - max(geracao_kwh - exportado_kwh, 0.0), 0.0)
+        autoconsumo = max(consumo_kwh - importado, 0.0)
+        economia = autoconsumo * float(self.config.get("tarifa_kwh", 0.92))
+        expected = geracao_kwh
+        line = "{},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},,{:.3f}\n".format(int(timestamp), geracao_kwh, consumo_kwh, exportado_kwh, geracao_kwh, consumo_kwh, importado, exportado_kwh, autoconsumo, economia, expected)
         with open(self.history_path, "a", encoding="utf-8") as f:
             f.write(line)
         self._enforce_history_flash_limit()
@@ -352,7 +356,7 @@ class DataProcessor:
             _ = f.readline()
             for line in f:
                 parts = line.strip().split(",")
-                if len(parts) != 4:
+                if len(parts) < 4:
                     continue
                 ts = int(parts[0])
                 if ts >= cutoff:

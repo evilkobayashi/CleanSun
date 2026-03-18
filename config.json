@@ -9,5 +9,9 @@
   "data_stale_seconds": 20,
   "simulation_anomalies_enabled": true,
   "simulation_random_fault_rate": 0.04,
-  "inverter_type": "hybrid"
+  "manual_override": false,
+  "manual_selected_type": null,
+  "detected_inverter_type": null,
+  "detection_source": "unknown",
+  "detection_confidence": 0.0
 }

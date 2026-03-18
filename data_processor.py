@@ -4,6 +4,7 @@ import os
 import time
 
 from alarms import AlarmEngine, SEVERITY_ORDER
+from inverter_detection import detect_inverter_type, normalize_type
 
 DEFAULT_CONFIG = {
     "tarifa_kwh": 0.92,
@@ -16,7 +17,11 @@ DEFAULT_CONFIG = {
     "data_stale_seconds": 20,
     "simulation_anomalies_enabled": True,
     "simulation_random_fault_rate": 0.04,
-    "inverter_type": "hybrid",
+    "manual_override": False,
+    "manual_selected_type": None,
+    "detected_inverter_type": None,
+    "detection_source": "unknown",
+    "detection_confidence": 0.0,
 }
 
 HISTORY_HEADER = "timestamp,geracao_kwh,consumo_kwh,exportado_kwh,solar_generation_kwh,house_consumption_kwh,grid_import_kwh,grid_export_kwh,self_consumption_kwh,estimated_savings_brl,weather_condition,expected_generation_kwh\n"
@@ -72,7 +77,7 @@ class DataProcessor:
             "history": {"daily": [], "weekly": [], "monthly": []},
             "status": {},
             "diagnostics": {},
-            "inverter_type": "hybrid",
+            "inverter_detection": {},
         }
 
     def register_fault(self, title, detail=""):
@@ -82,6 +87,7 @@ class DataProcessor:
         ts = int(now_ts if now_ts is not None else snapshot.get("timestamp", time.time()))
         self.last_snapshot = dict(snapshot)
         self.last_update_ts = ts
+        detection = self._update_detection(snapshot)
         indicators = self._compute_indicators(snapshot)
         technical = self._build_technical(snapshot, indicators)
         self._update_hourly_history(indicators, technical, ts)
@@ -92,7 +98,7 @@ class DataProcessor:
         profile = self._build_profile(history_rows, alerts)
         diagnostics = self.alarm_engine.diagnostics(snapshot, indicators, technical, alerts, self.last_update_ts, fault=self.fault)
         self.last_dashboard = {
-            "inverter_type": self.inverter_type(),
+            "inverter_detection": detection,
             "indicators": indicators,
             "alerts": alerts,
             "profile": profile,
@@ -459,28 +465,62 @@ class DataProcessor:
     def _history_views(self, rows):
         return {"daily": self.history_period(7, "daily"), "weekly": self.history_period(35, "weekly"), "monthly": self.history_period(365, "monthly")}
 
+    def _update_config(self):
+        self._write_json(self.config_path, self.config)
+
+    def _update_detection(self, snapshot):
+        status = detect_inverter_type(snapshot, self.config)
+        self.config["detected_inverter_type"] = status.get("detected_inverter_type")
+        self.config["detection_source"] = status.get("detection_source")
+        self.config["detection_confidence"] = status.get("confidence")
+        self._update_config()
+        return status
+
+    def detection_status(self):
+        return {
+            "detected_inverter_type": normalize_type(self.config.get("detected_inverter_type")),
+            "effective_inverter_type": self.effective_inverter_type(),
+            "detection_source": self.config.get("detection_source", "unknown"),
+            "confidence": round(float(self.config.get("detection_confidence", 0.0)), 2),
+            "confidence_label": self.last_dashboard.get("inverter_detection", {}).get("confidence_label", "baixa"),
+            "manual_override": bool(self.config.get("manual_override", False)),
+            "manual_selected_type": normalize_type(self.config.get("manual_selected_type")),
+            "metadata": self.inverter_metadata(),
+        }
+
+    def inverter_metadata(self):
+        return {key: self.last_snapshot.get(key) for key in ("manufacturer", "brand", "model", "product_family", "firmware_version", "inverter_mode", "serial_number", "inverter_capabilities") if self.last_snapshot.get(key) not in (None, "")}
+
+    def effective_inverter_type(self):
+        manual = normalize_type(self.config.get("manual_selected_type"))
+        if self.config.get("manual_override") and manual:
+            return manual
+        detected = normalize_type(self.config.get("detected_inverter_type"))
+        return detected or "hybrid"
+
+    def set_manual_override(self, inverter_type):
+        normalized = normalize_type(inverter_type)
+        if normalized is None:
+            raise ValueError("invalid_inverter_type")
+        self.config["manual_override"] = True
+        self.config["manual_selected_type"] = normalized
+        self._update_config()
+        return self.detection_status()
+
+    def clear_manual_override(self):
+        self.config["manual_override"] = False
+        self.config["manual_selected_type"] = None
+        self._update_config()
+        return self.detection_status()
+
     def inverter_type(self):
-        raw = str(self.config.get("inverter_type", "hybrid")).strip().lower()
-        if raw in ("híbrido", "hibrido"):
-            return "hybrid"
-        if raw in ("on-grid", "off-grid", "hybrid"):
-            return raw
-        return "hybrid"
+        return self.effective_inverter_type()
 
     def set_inverter_type(self, inverter_type):
-        normalized = str(inverter_type or "hybrid").strip().lower()
-        if normalized in ("híbrido", "hibrido"):
-            normalized = "hybrid"
-        if normalized not in ("on-grid", "off-grid", "hybrid"):
-            raise ValueError("invalid_inverter_type")
-        self.config["inverter_type"] = normalized
-        self._write_json(self.config_path, self.config)
-        if self.last_dashboard:
-            self.last_dashboard["inverter_type"] = normalized
-        return normalized
+        return self.set_manual_override(inverter_type)
 
     def _filter_payload_by_inverter_type(self, data, inverter_type=None):
-        inverter_type = inverter_type or self.inverter_type()
+        inverter_type = inverter_type or self.effective_inverter_type()
         dashboard = dict(data.get("dashboard", {})) if isinstance(data, dict) else {}
         indicators = dict(dashboard.get("indicators", {}))
         technical = dict(dashboard.get("technical", {}))
@@ -507,9 +547,11 @@ class DataProcessor:
         dashboard["reports"] = reports
         dashboard["alerts"] = alerts
         dashboard["inverter_type"] = inverter_type
+        dashboard["inverter_detection"] = self.detection_status()
         out = dict(data)
         out["dashboard"] = dashboard
         out["inverter_type"] = inverter_type
+        out["detection_status"] = self.detection_status()
         return out
 
     def _filter_alerts(self, items, severity=None, category=None, active=None):
@@ -525,7 +567,7 @@ class DataProcessor:
         return out
 
     def payload(self):
-        base={"config": self.config, "snapshot": self.last_snapshot, "dashboard": self.last_dashboard, "updated_at": self.last_update_ts, "fault": self.fault, "inverter_type": self.inverter_type()}
+        base={"config": self.config, "snapshot": self.last_snapshot, "dashboard": self.last_dashboard, "updated_at": self.last_update_ts, "fault": self.fault, "inverter_type": self.effective_inverter_type(), "detection_status": self.detection_status()}
         return self._filter_payload_by_inverter_type(base)
 
     def indicators(self):

@@ -19,15 +19,22 @@ REGISTER_MAP = {
 class _FallbackInstrument:
     """Simula operação técnica de um inversor fotovoltaico residencial."""
 
+    DEVICE_PROFILES = {
+        "on-grid": {"manufacturer": "Growatt", "brand": "Growatt", "model": "MIN 5000TL-X", "product_family": "grid_tie", "serial_prefix": "GRT", "inverter_mode": "grid_tie", "inverter_capabilities": ["solar", "grid_export", "net_metering"]},
+        "off-grid": {"manufacturer": "Growatt", "brand": "Growatt", "model": "SPF 5000 ES", "product_family": "off_grid", "serial_prefix": "GOF", "inverter_mode": "island", "inverter_capabilities": ["solar", "battery", "load_supply"]},
+        "hybrid": {"manufacturer": "Growatt", "brand": "Growatt", "model": "SPH5000", "product_family": "hybrid", "serial_prefix": "GHY", "inverter_mode": "hybrid", "inverter_capabilities": ["solar", "battery", "grid_export", "backup"]},
+    }
+
     WEATHER_GAIN = {"céu claro": 1.0, "parcialmente nublado": 0.76, "nublado": 0.52}
     STATUS_MAP = {0: "Standby", 1: "Gerando", 2: "Falha", 3: "Desconectado"}
     RANDOM_SCENARIOS = ["normal", "sombreamento", "sobretensao_rede", "subtensao_rede", "temperatura_alta", "falha_comunicacao", "desbalanceamento_mppt", "sem_geracao_dia", "dc_subtensao", "dc_sobretensao"]
 
-    def __init__(self, weather="parcialmente nublado", kwp=5.0, scenario="auto", random_fault_rate=0.04):
+    def __init__(self, weather="parcialmente nublado", kwp=5.0, scenario="auto", random_fault_rate=0.04, inverter_type="hybrid"):
         self.weather = weather
         self.kwp = kwp
         self.scenario = scenario
         self.random_fault_rate = random_fault_rate
+        self.inverter_type = inverter_type if inverter_type in self.DEVICE_PROFILES else "hybrid"
         self.daily_kwh = 0.0
         self.total_kwh = 18452.7
         self.peak_power_kw = 0.0
@@ -38,6 +45,9 @@ class _FallbackInstrument:
         self._active_random = "normal"
         self._random_until_ts = 0
         self.battery_soc = 62.0
+        self.device_profile = dict(self.DEVICE_PROFILES[self.inverter_type])
+        self.device_profile["serial_number"] = self.device_profile["serial_prefix"] + "123456789"
+        self.device_profile["firmware_version"] = "FW-1.0.{}".format({"on-grid": 3, "off-grid": 7, "hybrid": 9}[self.inverter_type])
 
     @staticmethod
     def _sun_curve(hour_float):
@@ -196,6 +206,14 @@ class _FallbackInstrument:
             "dc_power_w": int(dc_kw * 1000),
             "ac_power_w": int(ac_kw * 1000),
             "simulation_scenario": scenario,
+            "manufacturer": self.device_profile["manufacturer"],
+            "brand": self.device_profile["brand"],
+            "model": self.device_profile["model"],
+            "product_family": self.device_profile["product_family"],
+            "firmware_version": self.device_profile["firmware_version"],
+            "inverter_mode": self.device_profile["inverter_mode"],
+            "serial_number": self.device_profile["serial_number"],
+            "inverter_capabilities": list(self.device_profile["inverter_capabilities"]),
             "battery_soc_percent": round(self.battery_soc, 1),
             "battery_voltage_v": round(battery_voltage, 1),
             "battery_current_a": round(battery_current_a, 2),
@@ -327,6 +345,14 @@ class GrowattModbusReader:
             "dc_power_w": int(pv_kw * 1030),
             "ac_power_w": int(pv_kw * 1000),
             "simulation_scenario": "hardware",
+            "manufacturer": "Growatt",
+            "brand": "Growatt",
+            "model": "SPH5000",
+            "product_family": "hybrid",
+            "firmware_version": "FW-1.0.9",
+            "inverter_mode": "hybrid",
+            "serial_number": "GHY123456789",
+            "inverter_capabilities": ["solar", "battery", "grid_export", "backup"],
             "battery_soc_percent": 68.0,
             "battery_voltage_v": 51.2,
             "battery_current_a": -8.6,

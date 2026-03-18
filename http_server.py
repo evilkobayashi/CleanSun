@@ -84,7 +84,9 @@ class CleanSunHTTPServer:
                 "/api/technical": lambda q: self.processor.technical(),
                 "/api/diagnostics": lambda q: self.processor.diagnostics(),
                 "/api/status": lambda q: self.processor.status(),
-                "/api/inverter-type": lambda q: {"inverter_type": self.processor.inverter_type()},
+                "/api/inverter-type": lambda q: {"inverter_type": self.processor.effective_inverter_type()},
+                "/api/inverter-metadata": lambda q: self.processor.inverter_metadata(),
+                "/api/detection-status": lambda q: self.processor.detection_status(),
                 "/api/summary/daily": lambda q: self.processor.summary("daily"),
                 "/api/summary/weekly": lambda q: self.processor.summary("weekly"),
                 "/api/history": lambda q: {"days": int(q.get("days", "7")), "bucket": q.get("bucket", "hourly"), "rows": self.processor.history_period(int(q.get("days", "7")), q.get("bucket", "hourly"))},
@@ -102,10 +104,15 @@ class CleanSunHTTPServer:
                     await self._send(writer, "404 Not Found", "application/json", json.dumps({"error": "not_found", "path": path}))
                 return
 
-            if method == "POST" and path == "/api/inverter-type":
+            if method == "POST" and path in ("/api/inverter-type", "/api/inverter-type/override"):
                 payload = json.loads(body.decode("utf-8") or "{}") if body else {}
-                inverter_type = self.processor.set_inverter_type(payload.get("inverter_type"))
-                await self._send(writer, "200 OK", "application/json", json.dumps({"inverter_type": inverter_type}, ensure_ascii=False))
+                status = self.processor.set_manual_override(payload.get("inverter_type"))
+                await self._send(writer, "200 OK", "application/json", json.dumps(status, ensure_ascii=False))
+                return
+
+            if method == "POST" and path == "/api/inverter-type/clear-override":
+                status = self.processor.clear_manual_override()
+                await self._send(writer, "200 OK", "application/json", json.dumps(status, ensure_ascii=False))
                 return
 
             await self._send(writer, "405 Method Not Allowed", "application/json", json.dumps({"error": "method_not_allowed"}))

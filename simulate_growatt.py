@@ -22,6 +22,7 @@ DEFAULT_CONFIG = {
     "history_file": "history.csv",
     "scenario": "auto",
     "random_fault_rate": 0.05,
+    "inverter_type": "hybrid",
 }
 
 HISTORY_FIELDS = [
@@ -31,7 +32,13 @@ HISTORY_FIELDS = [
 REGISTER_MAP = {0x0001: 0, 0x0003: 0, 0x0006: 0, 0x003B: 25000}
 WEATHER_GAIN = {"ensolarado": 1.0, "parcialmente_nublado": 0.76, "nublado": 0.52}
 SCENARIOS = ["auto", "normal", "sombreamento", "dc_subtensao", "dc_sobretensao", "desbalanceamento_mppt", "sobretensao_rede", "sem_geracao_dia", "temperatura_alta", "falha_comunicacao"]
+INVERTER_METADATA = {"on-grid": {"manufacturer": "Growatt", "model": "MIN 5000TL-X", "serial_prefix": "GRT", "product_family": "grid_tie"}, "off-grid": {"manufacturer": "Growatt", "model": "SPF 5000 ES", "serial_prefix": "GOF", "product_family": "off_grid"}, "hybrid": {"manufacturer": "Growatt", "model": "SPH5000", "serial_prefix": "GHY", "product_family": "hybrid"}}
 
+
+def inverter_metadata(inverter_type):
+    meta=dict(INVERTER_METADATA.get(inverter_type, INVERTER_METADATA["hybrid"]))
+    meta["serial_number"]=meta["serial_prefix"]+"123456789"
+    return meta
 
 def load_runtime_config(config_path="config.json"):
     config = dict(DEFAULT_CONFIG)
@@ -41,6 +48,7 @@ def load_runtime_config(config_path="config.json"):
         config["tarifa_kwh"] = loaded.get("tarifa_kwh", config["tarifa_kwh"])
         config["system_kwp"] = loaded.get("potencia_sistema_kwp", config["system_kwp"])
         config["random_fault_rate"] = loaded.get("simulation_random_fault_rate", config["random_fault_rate"])
+        config["inverter_type"] = loaded.get("inverter_type", config["inverter_type"])
     return config
 
 
@@ -161,7 +169,7 @@ def write_history(records, history_file, overwrite=False):
             writer.writerow(record)
 
 
-def generate_history(days, interval_minutes, tariff_kwh, system_kwp, weather_mode="auto", scenario="auto", random_fault_rate=0.05, end_ts=None):
+def generate_history(days, interval_minutes, tariff_kwh, system_kwp, weather_mode="auto", scenario="auto", random_fault_rate=0.05, inverter_type="hybrid", end_ts=None):
     timestamps = generate_timestamps(days, interval_minutes, end_ts=end_ts)
     daily_weather, daily_scenario, records, total_generation = {}, {}, [], 0.0
     for ts in timestamps:
@@ -172,7 +180,7 @@ def generate_history(days, interval_minutes, tariff_kwh, system_kwp, weather_mod
             daily_scenario[day_key] = pick_scenario(sum(day_key), scenario, random_fault_rate=random_fault_rate)
         record, total_generation = build_record(ts, interval_minutes, daily_weather[day_key], tariff_kwh, system_kwp, total_generation, daily_scenario[day_key])
         records.append(record)
-    return records, total_generation
+    return records, total_generation, inverter_metadata(inverter_type)
 
 
 class ContinuousSimulator:
@@ -247,6 +255,7 @@ def parse_args():
     parser.add_argument("--weather", choices=["auto", "ensolarado", "parcialmente_nublado", "nublado"], default=config["weather"])
     parser.add_argument("--scenario", choices=SCENARIOS, default=config["scenario"])
     parser.add_argument("--random-fault-rate", type=float, default=config["random_fault_rate"])
+    parser.add_argument("--inverter-type", choices=["on-grid", "off-grid", "hybrid"], default=config["inverter_type"])
     parser.add_argument("--host", default=config["host"])
     parser.add_argument("--port", type=int, default=config["port"])
     parser.add_argument("--history-file", default=config["history_file"])
@@ -256,9 +265,9 @@ def parse_args():
 
 def main():
     args = parse_args()
-    records, total_generation = generate_history(days=args.days, interval_minutes=args.interval_minutes, tariff_kwh=args.tariff, system_kwp=args.system_kwp, weather_mode=args.weather, scenario=args.scenario, random_fault_rate=args.random_fault_rate)
+    records, total_generation, metadata = generate_history(days=args.days, interval_minutes=args.interval_minutes, tariff_kwh=args.tariff, system_kwp=args.system_kwp, weather_mode=args.weather, scenario=args.scenario, random_fault_rate=args.random_fault_rate, inverter_type=args.inverter_type)
     write_history(records, args.history_file, overwrite=args.overwrite)
-    print("Histórico gerado: {days} dias, {count} registros, intervalo de {interval} min em {file}".format(days=args.days, count=len(records), interval=args.interval_minutes, file=args.history_file))
+    print("Histórico gerado: {days} dias, {count} registros, intervalo de {interval} min em {file} | inversor={model} serial={serial}".format(days=args.days, count=len(records), interval=args.interval_minutes, file=args.history_file, model=metadata["model"], serial=metadata["serial_number"]))
     if args.continuous:
         ContinuousSimulator(host=args.host, port=args.port, interval_minutes=args.interval_minutes, tariff_kwh=args.tariff, system_kwp=args.system_kwp, weather_mode=args.weather, history_file=args.history_file, start_total=total_generation, scenario=args.scenario, random_fault_rate=args.random_fault_rate).run()
 

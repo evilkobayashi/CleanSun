@@ -48,7 +48,7 @@ def load_runtime_config(config_path="config.json"):
         config["tarifa_kwh"] = loaded.get("tarifa_kwh", config["tarifa_kwh"])
         config["system_kwp"] = loaded.get("potencia_sistema_kwp", config["system_kwp"])
         config["random_fault_rate"] = loaded.get("simulation_random_fault_rate", config["random_fault_rate"])
-        config["inverter_type"] = loaded.get("inverter_type", config["inverter_type"])
+        config["inverter_type"] = loaded.get("simulation_inverter_type", loaded.get("inverter_type", config["inverter_type"]))
     return config
 
 

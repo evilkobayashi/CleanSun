@@ -117,6 +117,21 @@ class _FallbackInstrument:
             generation_kw *= 0.20
         return generation_kw, temp_c, grid_voltage, grid_freq, mppt1_v, mppt2_v, mppt1_kw, mppt2_kw, communication_status
 
+    def _apply_profile_behaviour(self, load_kw, ac_kw, import_kw, export_kw, battery_power_kw, grid_available, scenario):
+        if self.inverter_type == "on-grid":
+            battery_power_kw = 0.0
+            self.battery_soc = 0.0
+            import_kw = max(0.0, load_kw - ac_kw)
+            export_kw = max(0.0, ac_kw - load_kw)
+            grid_available = True if scenario != "rede_indisponivel" else False
+        elif self.inverter_type == "off-grid":
+            export_kw = 0.0
+            import_kw = 0.0
+            grid_available = False
+            battery_power_kw = max(-3.2, min(3.2, ac_kw - load_kw * 0.92))
+            self.battery_soc = max(10.0, min(98.0, self.battery_soc + battery_power_kw * 0.04))
+        return import_kw, export_kw, battery_power_kw, grid_available
+
     def _tick(self):
         now = time.time()
         delta_h = max(0.0, now - self._last_tick) / 3600.0
@@ -149,10 +164,16 @@ class _FallbackInstrument:
         if scenario == "temperatura_alta":
             efficiency -= 3.2
         efficiency = max(88.0, min(efficiency, 98.4))
-        ac_kw = dc_kw * efficiency / 100.0 if grid_available else 0.0
-        ac_current = (ac_kw * 1000 / max(grid_voltage, 1)) if grid_voltage else 0.0
-        export_kw = max(0.0, ac_kw - load_kw)
+        ac_kw = dc_kw * efficiency / 100.0 if (grid_available or self.inverter_type in ("off-grid", "hybrid")) else 0.0
+        battery_power_kw = max(-2.8, min(2.8, dc_kw - load_kw * 0.82))
+        if scenario in ("sem_geracao_dia", "falha_comunicacao"):
+            battery_power_kw = -max(0.4, load_kw * 0.65)
+        elif scenario == "temperatura_alta":
+            battery_power_kw *= 0.8
         import_kw = max(0.0, load_kw - ac_kw)
+        export_kw = max(0.0, ac_kw - load_kw)
+        import_kw, export_kw, battery_power_kw, grid_available = self._apply_profile_behaviour(load_kw, ac_kw, import_kw, export_kw, battery_power_kw, grid_available, scenario)
+        ac_current = (ac_kw * 1000 / max(grid_voltage, 1)) if grid_voltage else 0.0
         power_factor = max(0.88, min(0.995, 0.97 + random.uniform(-0.03, 0.01)))
         apparent_kw = ac_kw / max(power_factor, 0.01) if ac_kw else 0.0
         grid_current = ((import_kw if import_kw > 0 else export_kw) * 1000 / max(grid_voltage, 1)) if grid_voltage else 0.0
@@ -162,19 +183,20 @@ class _FallbackInstrument:
 
         mppt1_a = (mppt1_kw * 1000 / max(mppt1_v, 1)) if mppt1_v else 0.0
         mppt2_a = (mppt2_kw * 1000 / max(mppt2_v, 1)) if mppt2_v else 0.0
-        battery_power_kw = max(-2.8, min(2.8, dc_kw - load_kw * 0.82))
-        if scenario in ("sem_geracao_dia", "falha_comunicacao"):
-            battery_power_kw = -max(0.4, load_kw * 0.65)
-        elif scenario == "temperatura_alta":
-            battery_power_kw *= 0.8
-        self.battery_soc = max(8.0, min(98.0, self.battery_soc + battery_power_kw * delta_h * 7.5))
-        if self.battery_soc < 18:
-            battery_power_kw = min(battery_power_kw, -0.15)
+        if self.inverter_type != "on-grid":
+            self.battery_soc = max(8.0, min(98.0, self.battery_soc + battery_power_kw * delta_h * 7.5))
+            if self.battery_soc < 18:
+                battery_power_kw = min(battery_power_kw, -0.15)
         battery_current_a = (battery_power_kw * 1000 / max(battery_voltage, 1)) if battery_voltage else 0.0
         battery_mode = "charging" if battery_power_kw > 0.12 else "discharging" if battery_power_kw < -0.12 else "idle"
-        autonomy_h = (self.battery_soc / 100.0 * 9.6) / max(load_kw, 0.2)
-        backup_mode_active = scenario in ("rede_indisponivel", "sem_geracao_dia") or self.battery_soc < 25
-        operating_mode = "backup" if backup_mode_active else "battery_support" if battery_mode == "discharging" else "grid_assist" if import_kw > 0 else "solar_priority"
+        autonomy_h = (self.battery_soc / 100.0 * 9.6) / max(load_kw, 0.2) if self.inverter_type != "on-grid" else 0.0
+        backup_mode_active = self.inverter_type in ("off-grid", "hybrid") and (scenario in ("rede_indisponivel", "sem_geracao_dia") or self.battery_soc < 25)
+        if self.inverter_type == "on-grid":
+            operating_mode = "grid_tie"
+        elif self.inverter_type == "off-grid":
+            operating_mode = "island"
+        else:
+            operating_mode = "backup" if backup_mode_active else "battery_support" if battery_mode == "discharging" else "grid_assist" if import_kw > 0 else "solar_priority"
 
         if ac_kw > 0.05 and self._start_generation_ts is None:
             self._start_generation_ts = int(now)
@@ -187,7 +209,7 @@ class _FallbackInstrument:
         if self._start_generation_ts and self._end_generation_ts:
             generation_time_h = max(0.0, (self._end_generation_ts - self._start_generation_ts) / 3600.0)
 
-        self._cache = {
+        snapshot = {
             "potencia_instantanea_w": int(ac_kw * 1000),
             "tensao_dc_v": round((mppt1_v + mppt2_v) / 2.0, 1),
             "geracao_dia_kwh": round(self.daily_kwh, 3),
@@ -214,14 +236,6 @@ class _FallbackInstrument:
             "inverter_mode": self.device_profile["inverter_mode"],
             "serial_number": self.device_profile["serial_number"],
             "inverter_capabilities": list(self.device_profile["inverter_capabilities"]),
-            "battery_soc_percent": round(self.battery_soc, 1),
-            "battery_voltage_v": round(battery_voltage, 1),
-            "battery_current_a": round(battery_current_a, 2),
-            "battery_power_kw": round(battery_power_kw, 2),
-            "battery_mode": battery_mode,
-            "autonomy_hours": round(autonomy_h, 2),
-            "backup_mode_active": backup_mode_active,
-            "operating_mode": operating_mode,
             "load_power_kw": round(load_kw, 2),
             "grid_available": grid_available,
             "dc_input": {
@@ -240,14 +254,6 @@ class _FallbackInstrument:
                 "frequency_hz": round(grid_freq, 2),
                 "power_factor": round(power_factor, 3),
             },
-            "grid": {
-                "grid_voltage_v": round(grid_voltage, 1),
-                "grid_current_a": round(grid_current, 2),
-                "grid_status": grid_status,
-                "frequency_hz": round(grid_freq, 2),
-                "active_power_kw": round(ac_kw, 2),
-                "apparent_power_kva": round(apparent_kw, 2),
-            },
             "inverter": {
                 "temperature_c": round(temp_c, 1),
                 "efficiency_percent": round(efficiency, 2),
@@ -264,17 +270,8 @@ class _FallbackInstrument:
                 "generation_start_time": time.strftime("%H:%M", time.localtime(self._start_generation_ts)) if self._start_generation_ts else "--:--",
                 "generation_end_time": time.strftime("%H:%M", time.localtime(self._end_generation_ts)) if self._end_generation_ts else "--:--",
                 "generation_duration_h": round(generation_time_h, 2),
-                "battery_available_kwh": round(self.battery_soc / 100.0 * 9.6, 2),
+                "battery_available_kwh": round(self.battery_soc / 100.0 * 9.6, 2) if self.inverter_type != "on-grid" else 0.0,
                 "autonomy_hours": round(autonomy_h, 2),
-            },
-            "battery": {
-                "soc_percent": round(self.battery_soc, 1),
-                "voltage_v": round(battery_voltage, 1),
-                "current_a": round(battery_current_a, 2),
-                "power_kw": round(battery_power_kw, 2),
-                "mode": battery_mode,
-                "autonomy_hours": round(autonomy_h, 2),
-                "available_energy_kwh": round(self.battery_soc / 100.0 * 9.6, 2),
             },
             "operation": {
                 "operating_mode": operating_mode,
@@ -282,6 +279,36 @@ class _FallbackInstrument:
                 "grid_available": grid_available,
             },
         }
+        if self.inverter_type != "off-grid":
+            snapshot["grid"] = {
+                "grid_voltage_v": round(grid_voltage, 1),
+                "grid_current_a": round(grid_current, 2),
+                "grid_status": grid_status,
+                "frequency_hz": round(grid_freq, 2),
+                "active_power_kw": round(ac_kw, 2),
+                "apparent_power_kva": round(apparent_kw, 2),
+            }
+        if self.inverter_type != "on-grid":
+            snapshot.update({
+                "battery_soc_percent": round(self.battery_soc, 1),
+                "battery_voltage_v": round(battery_voltage, 1),
+                "battery_current_a": round(battery_current_a, 2),
+                "battery_power_kw": round(battery_power_kw, 2),
+                "battery_mode": battery_mode,
+                "autonomy_hours": round(autonomy_h, 2),
+                "backup_mode_active": backup_mode_active,
+                "operating_mode": operating_mode,
+                "battery": {
+                    "soc_percent": round(self.battery_soc, 1),
+                    "voltage_v": round(battery_voltage, 1),
+                    "current_a": round(battery_current_a, 2),
+                    "power_kw": round(battery_power_kw, 2),
+                    "mode": battery_mode,
+                    "autonomy_hours": round(autonomy_h, 2),
+                    "available_energy_kwh": round(self.battery_soc / 100.0 * 9.6, 2),
+                },
+            })
+        self._cache = snapshot
 
     def read_register(self, register, number_of_decimals=0, signed=False):
         _ = (number_of_decimals, signed)

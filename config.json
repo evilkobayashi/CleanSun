@@ -13,5 +13,9 @@
   "manual_selected_type": null,
   "detected_inverter_type": null,
   "detection_source": "unknown",
-  "detection_confidence": 0.0
+  "detection_confidence": 0.0,
+  "technical_mode_password": "123456",
+  "technical_mode_enabled": true,
+  "technical_session_timeout_minutes": 120,
+  "simulation_inverter_type": "hybrid"
 }

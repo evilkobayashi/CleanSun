@@ -22,6 +22,10 @@ DEFAULT_CONFIG = {
     "detected_inverter_type": None,
     "detection_source": "unknown",
     "detection_confidence": 0.0,
+    "technical_mode_password": "123456",
+    "technical_mode_enabled": True,
+    "technical_session_timeout_minutes": 120,
+    "simulation_inverter_type": "hybrid",
 }
 
 HISTORY_HEADER = "timestamp,geracao_kwh,consumo_kwh,exportado_kwh,solar_generation_kwh,house_consumption_kwh,grid_import_kwh,grid_export_kwh,self_consumption_kwh,estimated_savings_brl,weather_condition,expected_generation_kwh\n"

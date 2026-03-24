@@ -110,6 +110,7 @@ class CleanSunHTTPServer:
         try:
             req = await reader.readline()
             if not req:
+                writer.close()
                 await writer.wait_closed()
                 return
             parts = req.decode("utf-8", "ignore").split(" ")
@@ -249,6 +250,7 @@ class CleanSunHTTPServer:
         except Exception:
             pass
         finally:
+            writer.close()
             await writer.wait_closed()
 
     async def _send(self, writer, status, content_type, body, extra_headers=None):
@@ -266,4 +268,5 @@ class CleanSunHTTPServer:
         writer.write(response)
         writer.write(body)
         await writer.drain()
+        writer.close()
         await writer.wait_closed()

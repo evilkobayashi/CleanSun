@@ -374,5 +374,228 @@ class TestSimulateGrowatt(unittest.TestCase):
         self.assertGreater(house_consumption_kw(7, 0), house_consumption_kw(3, 0))
 
 
+class TestDeyeDataMapping(unittest.TestCase):
+    def _make_raw(self):
+        return {
+            "pv1_v_raw": 3520,    # 352.0 V
+            "pv1_a_raw": 95,      # 9.5 A
+            "pv2_v_raw": 3480,    # 348.0 V
+            "pv2_a_raw": 90,      # 9.0 A
+            "pv1_w_raw": 3344,    # 3344 W
+            "pv2_w_raw": 3132,    # 3132 W
+            "temp_raw": 435,      # 43.5 °C
+            "batt_v_raw": 512,    # 51.2 V
+            "batt_soc_raw": 75,   # 75 %
+            "batt_w_raw": 1200,   # 1200 W (charging)
+            "grid_w_raw": 64536,  # signed: 64536 - 65536 = -1000 W (exporting)
+            "grid_v_raw": 2200,   # 220.0 V
+            "grid_hz_raw": 6000,  # 60.00 Hz
+            "load_w_raw": 2476,   # 2476 W
+            "today_kwh_raw": 312, # 31.2 kWh
+            "total_kwh_raw": 4521,# 452.1 kWh
+        }
+
+    def test_mapping_pv_power(self):
+        from solarman_reader import _map_raw_to_snapshot
+        snap = _map_raw_to_snapshot(self._make_raw())
+        self.assertEqual(snap["potencia_instantanea_w"], 3344 + 3132)
+
+    def test_mapping_dc_voltage(self):
+        from solarman_reader import _map_raw_to_snapshot
+        snap = _map_raw_to_snapshot(self._make_raw())
+        self.assertAlmostEqual(snap["tensao_dc_v"], (352.0 + 348.0) / 2, places=1)
+
+    def test_mapping_battery(self):
+        from solarman_reader import _map_raw_to_snapshot
+        snap = _map_raw_to_snapshot(self._make_raw())
+        self.assertEqual(snap["battery_soc_percent"], 75)
+        self.assertAlmostEqual(snap["battery_voltage_v"], 51.2, places=1)
+        self.assertAlmostEqual(snap["battery_power_kw"], 1.2, places=2)
+        self.assertEqual(snap["battery_mode"], "charging")
+
+    def test_mapping_grid_export(self):
+        from solarman_reader import _map_raw_to_snapshot
+        snap = _map_raw_to_snapshot(self._make_raw())
+        self.assertEqual(snap["import_power_w"], 0)
+        self.assertEqual(snap["export_power_w"], 1000)
+
+    def test_mapping_energy(self):
+        from solarman_reader import _map_raw_to_snapshot
+        snap = _map_raw_to_snapshot(self._make_raw())
+        self.assertAlmostEqual(snap["geracao_dia_kwh"], 31.2, places=1)
+        self.assertAlmostEqual(snap["geracao_total_kwh"], 452.1, places=1)
+
+    def test_mapping_metadata(self):
+        from solarman_reader import _map_raw_to_snapshot
+        snap = _map_raw_to_snapshot(self._make_raw())
+        self.assertEqual(snap["manufacturer"], "Deye")
+        self.assertEqual(snap["model"], "SUN-7.5K-SG05LP2-US-SM2")
+        self.assertEqual(snap["product_family"], "hybrid")
+
+
+class TestSolarmanLANTransport(unittest.TestCase):
+    @patch("solarman_reader._PYSOLARMAN_AVAILABLE", True)
+    @patch("solarman_reader.PySolarmanV5")
+    def test_read_registers_calls_pysolarman(self, MockPV5):
+        from solarman_reader import SolarmanLANTransport
+        inst = MockPV5.return_value
+        inst.read_input_registers.side_effect = [
+            [3520, 95, 3480, 90],
+            [435],
+            [312, 0, 4521],
+            [512, 75, 0, 3344, 3132, 0, 0, 1200],
+            [64536, 0, 0, 0, 2200, 6000],
+            [2476],
+        ]
+        transport = SolarmanLANTransport("192.168.1.100", 1234567890)
+        raw = transport.read_registers()
+        self.assertEqual(raw["pv1_v_raw"], 3520)
+        self.assertEqual(raw["batt_soc_raw"], 75)
+        self.assertEqual(raw["grid_w_raw"], 64536)
+        self.assertEqual(raw["load_w_raw"], 2476)
+
+    @patch("solarman_reader._PYSOLARMAN_AVAILABLE", False)
+    def test_raises_when_pysolarmanv5_not_installed(self):
+        from solarman_reader import SolarmanLANTransport
+        transport = SolarmanLANTransport("192.168.1.100", 1234567890)
+        with self.assertRaises(RuntimeError):
+            transport.read_registers()
+
+
+class TestSolarmanCloudTransport(unittest.TestCase):
+    def _cloud_cfg(self):
+        return {
+            "enabled": True,
+            "email": "test@example.com",
+            "password": "secret",
+            "app_id": "myapp123",
+            "app_secret": "appsecret456",
+            "device_sn": "DEY123456",
+        }
+
+    @patch("urllib.request.urlopen")
+    def test_raises_when_disabled(self, _):
+        from solarman_reader import SolarmanCloudTransport
+        transport = SolarmanCloudTransport({"enabled": False})
+        with self.assertRaises(RuntimeError):
+            transport.read_registers()
+
+    @patch("urllib.request.urlopen")
+    def test_read_registers_returns_raw(self, mock_urlopen):
+        from solarman_reader import SolarmanCloudTransport
+
+        token_resp = json.dumps({"access_token": "tok123", "token_type": "bearer"}).encode()
+        data_resp = json.dumps({
+            "dataList": [
+                {"key": "PV1Volt", "value": "352.0"},
+                {"key": "PV1Curr", "value": "9.5"},
+                {"key": "PV2Volt", "value": "348.0"},
+                {"key": "PV2Curr", "value": "9.0"},
+                {"key": "PV1Power", "value": "3344"},
+                {"key": "PV2Power", "value": "3132"},
+                {"key": "DC_Temp", "value": "43.5"},
+                {"key": "BatVolt", "value": "51.2"},
+                {"key": "BatCapcity", "value": "75"},
+                {"key": "BatPower", "value": "1.2"},
+                {"key": "GridOrMeterActivePower", "value": "-1.0"},
+                {"key": "GridVolt", "value": "220.0"},
+                {"key": "GridFreq", "value": "60.0"},
+                {"key": "LoadPower", "value": "2.476"},
+                {"key": "Eday", "value": "31.2"},
+                {"key": "Etotal", "value": "452.1"},
+            ]
+        }).encode()
+
+        mock_resp_token = MagicMock()
+        mock_resp_token.read.return_value = token_resp
+        mock_resp_token.__enter__ = lambda s: s
+        mock_resp_token.__exit__ = MagicMock(return_value=False)
+
+        mock_resp_data = MagicMock()
+        mock_resp_data.read.return_value = data_resp
+        mock_resp_data.__enter__ = lambda s: s
+        mock_resp_data.__exit__ = MagicMock(return_value=False)
+
+        mock_urlopen.side_effect = [mock_resp_token, mock_resp_data]
+
+        transport = SolarmanCloudTransport(self._cloud_cfg())
+        raw = transport.read_registers()
+
+        self.assertEqual(raw["pv1_w_raw"], 3344)
+        self.assertEqual(raw["batt_soc_raw"], 75)
+        self.assertEqual(raw["grid_w_raw"], -1000)
+
+
+class TestDeyeSolarmanReader(unittest.TestCase):
+    def _lan_cfg(self):
+        return {
+            "datalogger_ip": "192.168.1.100",
+            "datalogger_serial": 1234567890,
+            "datalogger_port": 8899,
+            "mb_slaveid": 1,
+            "lan_fail_threshold": 3,
+            "cloud_fallback": {"enabled": False},
+        }
+
+    def _make_raw(self):
+        return {
+            "pv1_v_raw": 3520, "pv1_a_raw": 95, "pv2_v_raw": 3480, "pv2_a_raw": 90,
+            "pv1_w_raw": 3344, "pv2_w_raw": 3132, "temp_raw": 435,
+            "batt_v_raw": 512, "batt_soc_raw": 75, "batt_w_raw": 1200,
+            "grid_w_raw": 64536, "grid_v_raw": 2200, "grid_hz_raw": 6000,
+            "load_w_raw": 2476, "today_kwh_raw": 312, "total_kwh_raw": 4521,
+        }
+
+    def test_read_all_returns_full_snapshot(self):
+        from solarman_reader import DeyeSolarmanReader
+        reader = DeyeSolarmanReader(self._lan_cfg())
+        reader._lan.read_registers = MagicMock(return_value=self._make_raw())
+        data = reader.read_all()
+        self.assertIn("potencia_instantanea_w", data)
+        self.assertIn("battery_soc_percent", data)
+        self.assertIn("timestamp", data)
+        self.assertEqual(data["potencia_instantanea_w"], 3344 + 3132)
+
+    def test_lan_failure_increments_counter(self):
+        from solarman_reader import DeyeSolarmanReader
+        cfg = self._lan_cfg()
+        cfg["lan_fail_threshold"] = 1
+        cfg["cloud_fallback"] = {"enabled": False}
+        reader = DeyeSolarmanReader(cfg)
+        reader._lan.read_registers = MagicMock(side_effect=OSError("timeout"))
+        with self.assertRaises(OSError):
+            reader.read_all()
+        self.assertEqual(reader._lan_fail_count, 1)
+
+    def test_switches_to_cloud_after_threshold(self):
+        from solarman_reader import DeyeSolarmanReader
+        cfg = self._lan_cfg()
+        cfg["lan_fail_threshold"] = 2
+        cfg["cloud_fallback"] = {"enabled": True, "email": "", "password": "",
+                                  "app_id": "", "app_secret": "", "device_sn": ""}
+        reader = DeyeSolarmanReader(cfg)
+        reader._lan.read_registers = MagicMock(side_effect=OSError("no route"))
+        reader._cloud.read_registers = MagicMock(return_value=self._make_raw())
+        # Call 1: LAN fails, count=1 < threshold=2, raises
+        with self.assertRaises(OSError):
+            reader.read_all()
+        self.assertEqual(reader._lan_fail_count, 1)
+        self.assertFalse(reader._using_cloud)
+        # Call 2: LAN fails, count=2 >= threshold, switches to cloud, returns data
+        data = reader.read_all()
+        self.assertTrue(reader._using_cloud)
+        self.assertEqual(data["potencia_instantanea_w"], 3344 + 3132)
+        reader._cloud.read_registers.assert_called_once()
+
+    def test_memory_snapshot(self):
+        from solarman_reader import DeyeSolarmanReader
+        reader = DeyeSolarmanReader(self._lan_cfg())
+        reader._lan.read_registers = MagicMock(return_value=self._make_raw())
+        reader.read_all()
+        reader.read_all()
+        snap = reader.get_memory_snapshot()
+        self.assertEqual(len(snap), 2)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

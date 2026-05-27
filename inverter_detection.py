@@ -19,7 +19,16 @@ CATALOG = {
             "GOF": {"type": "off-grid", "confidence": 0.84},
             "GHY": {"type": "hybrid", "confidence": 0.88},
         },
-    }
+    },
+    "deye": {
+        "models": {
+            "SUN-7.5K-SG05LP2-US-SM2": {"type": "hybrid", "confidence": 0.98, "family": "hybrid"},
+        },
+        "families": {
+            "hybrid": {"type": "hybrid", "confidence": 0.93},
+        },
+        "serial_prefixes": {},
+    },
 }
 
 

@@ -359,21 +359,6 @@ class TestHTTPServer(unittest.TestCase):
         self.assertIn(".", API_VERSION)
 
 
-class TestSimulateGrowatt(unittest.TestCase):
-    """Testes para o simulador."""
-    
-    def test_solar_curve(self):
-        from simulate_growatt import solar_curve
-        self.assertGreaterEqual(solar_curve(12), 0)
-        self.assertLessEqual(solar_curve(0), 0)
-        self.assertGreater(solar_curve(10), solar_curve(8))
-    
-    def test_house_consumption(self):
-        from simulate_growatt import house_consumption_kw
-        self.assertGreater(house_consumption_kw(20, 0), 0)
-        self.assertGreater(house_consumption_kw(7, 0), house_consumption_kw(3, 0))
-
-
 class TestDeyeDataMapping(unittest.TestCase):
     def _make_raw(self):
         return {

@@ -44,6 +44,16 @@ def _signed16(val: int) -> int:
 
 def _map_raw_to_snapshot(raw: dict) -> dict:
     """Map raw register dict to CleanSun telemetry snapshot."""
+    _REQUIRED = (
+        "pv1_v_raw", "pv1_a_raw", "pv2_v_raw", "pv2_a_raw",
+        "pv1_w_raw", "pv2_w_raw", "temp_raw",
+        "batt_v_raw", "batt_soc_raw", "batt_w_raw",
+        "grid_w_raw", "grid_v_raw", "grid_hz_raw",
+        "load_w_raw", "today_kwh_raw", "total_kwh_raw",
+    )
+    missing = [k for k in _REQUIRED if k not in raw]
+    if missing:
+        raise ValueError("Raw dict missing keys: {}".format(missing))
     pv1_v  = raw["pv1_v_raw"] * 0.1
     pv1_a  = raw["pv1_a_raw"] * 0.1
     pv2_v  = raw["pv2_v_raw"] * 0.1
@@ -350,6 +360,18 @@ class DeyeSolarmanReader:
         self._lan_fail_count: int = 0
         self._using_cloud: bool = False
 
+        self._threshold: int = int(solarman_cfg.get("lan_fail_threshold", 3))
+        if not solarman_cfg.get("datalogger_ip"):
+            raise ValueError(
+                "solarman config missing 'datalogger_ip' — "
+                "set the IP of your SOLARMAN Wi-Fi datalogger in config.json"
+            )
+        if not solarman_cfg.get("datalogger_serial"):
+            raise ValueError(
+                "solarman config missing 'datalogger_serial' — "
+                "set the serial number from your datalogger sticker in config.json"
+            )
+
         self._lan = SolarmanLANTransport(
             ip=solarman_cfg["datalogger_ip"],
             serial=int(solarman_cfg["datalogger_serial"]),
@@ -359,7 +381,6 @@ class DeyeSolarmanReader:
         self._cloud = SolarmanCloudTransport(
             solarman_cfg.get("cloud_fallback", {"enabled": False})
         )
-        self._threshold: int = int(solarman_cfg.get("lan_fail_threshold", 3))
 
     def _read_raw(self) -> dict:
         if self._using_cloud:

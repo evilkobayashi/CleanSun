@@ -16,25 +16,26 @@ from logger import CleanSunLogger
 _log = CleanSunLogger("cleansun.solarman", "INFO")
 
 # ---------------------------------------------------------------------------
-# Register map — all Input Registers (Function Code 04)
+# Register map — Holding Registers (Function Code 03)
+# Deye SUN-7.5K-SG05LP2-US-SM2 uses FC03, not FC04
 # ---------------------------------------------------------------------------
 
-_REG_PV1_V       = 60    # ×0.1 V
+_REG_PV1_V       = 60    # ×0.1 V (no-signal at night: ~65429, treated as 0)
 _REG_PV1_A       = 61    # ×0.1 A
 _REG_PV2_V       = 62    # ×0.1 V
 _REG_PV2_A       = 63    # ×0.1 A
-_REG_TEMP        = 90    # ×0.1 °C
+_REG_GRID_HZ     = 79    # ×0.01 Hz
+_REG_TEMP        = 90    # (value − 1000) × 0.1 °C
 _REG_TODAY_KWH   = 109   # ×0.1 kWh
-_REG_TOTAL_KWH   = 111   # ×0.1 kWh (register 110 skipped)
-_REG_BATT_V      = 183   # ×0.1 V
+_REG_TOTAL_KWH   = 111   # ×0.1 kWh
+_REG_GRID_V      = 150   # ×0.1 V, L1 phase voltage
+_REG_GRID_W      = 169   # ×1 W signed (positive=importing)
+_REG_LOAD_W      = 175   # ×1 W signed-negative (abs for load W)
+_REG_BATT_V      = 183   # ×0.01 V
 _REG_BATT_SOC    = 184   # ×1 %
 _REG_PV1_W       = 186   # ×1 W
 _REG_PV2_W       = 187   # ×1 W
 _REG_BATT_W      = 190   # ×1 W signed (positive=charging)
-_REG_GRID_W      = 1167  # ×1 W signed (positive=importing)
-_REG_GRID_V      = 1171  # ×0.1 V
-_REG_GRID_HZ     = 1172  # ×0.01 Hz
-_REG_LOAD_W      = 1199  # ×1 W
 
 
 def _signed16(val: int) -> int:
@@ -42,7 +43,7 @@ def _signed16(val: int) -> int:
     return val if val < 0x8000 else val - 0x10000
 
 
-def _map_raw_to_snapshot(raw: dict) -> dict:
+def _map_raw_to_snapshot(raw: dict, battery_kwh: float = 9.6) -> dict:
     """Map raw register dict to CleanSun telemetry snapshot."""
     _REQUIRED = (
         "pv1_v_raw", "pv1_a_raw", "pv2_v_raw", "pv2_a_raw",
@@ -54,20 +55,20 @@ def _map_raw_to_snapshot(raw: dict) -> dict:
     missing = [k for k in _REQUIRED if k not in raw]
     if missing:
         raise ValueError("Raw dict missing keys: {}".format(missing))
-    pv1_v  = raw["pv1_v_raw"] * 0.1
-    pv1_a  = raw["pv1_a_raw"] * 0.1
-    pv2_v  = raw["pv2_v_raw"] * 0.1
-    pv2_a  = raw["pv2_a_raw"] * 0.1
+    pv1_v  = max(0.0, _signed16(raw["pv1_v_raw"]) * 0.1)
+    pv1_a  = max(0.0, _signed16(raw["pv1_a_raw"]) * 0.1)
+    pv2_v  = max(0.0, _signed16(raw["pv2_v_raw"]) * 0.1)
+    pv2_a  = max(0.0, _signed16(raw["pv2_a_raw"]) * 0.1)
     pv1_w  = raw["pv1_w_raw"]
     pv2_w  = raw["pv2_w_raw"]
-    temp   = raw["temp_raw"] * 0.1
-    batt_v = raw["batt_v_raw"] * 0.1
+    temp   = (raw["temp_raw"] - 1000) * 0.1
+    batt_v = raw["batt_v_raw"] * 0.01
     batt_soc = raw["batt_soc_raw"]
     batt_w = _signed16(raw["batt_w_raw"])
     grid_w = _signed16(raw["grid_w_raw"])
     grid_v = raw["grid_v_raw"] * 0.1
     grid_hz = raw["grid_hz_raw"] * 0.01
-    load_w = raw["load_w_raw"]
+    load_w = abs(_signed16(raw["load_w_raw"]))
     today_kwh = raw["today_kwh_raw"] * 0.1
     total_kwh = raw["total_kwh_raw"] * 0.1
 
@@ -86,7 +87,7 @@ def _map_raw_to_snapshot(raw: dict) -> dict:
 
     if grid_v < 1.0:
         grid_status = "Indisponível"
-    elif not (195.0 <= grid_v <= 245.0):
+    elif not (115.0 <= grid_v <= 140.0):
         grid_status = "Alarme"
     else:
         grid_status = "Normal"
@@ -112,7 +113,7 @@ def _map_raw_to_snapshot(raw: dict) -> dict:
         # Inverter state
         "temperature_c": round(temp, 1),
         "status_code": 1,
-        "inverter_status": "Gerando" if (pv1_w + pv2_w) > 50 else "Standby",
+        "inverter_status": "Gerando" if (pv1_w + pv2_w) > 50 else ("Fornecendo" if batt_w < -50 else "Standby"),
         "communication_status": raw.get("_comm_status", "Online"),
         "grid_status": grid_status,
         "grid_available": grid_v > 1.0,
@@ -149,14 +150,14 @@ def _map_raw_to_snapshot(raw: dict) -> dict:
         },
         "ac_output": {
             "voltage_v": round(grid_v, 1),
-            "current_a": round((pv1_w + pv2_w) / max(grid_v * 1000.0, 1.0), 2),
+            "current_a": round((pv1_w + pv2_w) / max(grid_v, 1.0), 2),
             "power_kw": round(dc_kw, 2),
             "frequency_hz": round(grid_hz, 2),
             "power_factor": 0.99,
         },
         "grid": {
             "grid_voltage_v": round(grid_v, 1),
-            "grid_current_a": round(abs(grid_w) / max(grid_v * 1000.0, 1.0), 2),
+            "grid_current_a": round(abs(grid_w) / max(grid_v, 1.0), 2),
             "grid_status": grid_status,
             "frequency_hz": round(grid_hz, 2),
             "active_power_kw": round(grid_w / 1000.0, 2),
@@ -169,14 +170,14 @@ def _map_raw_to_snapshot(raw: dict) -> dict:
             "power_kw": round(batt_kw, 2),
             "mode": batt_mode,
             "autonomy_hours": 0.0,
-            "available_energy_kwh": round(batt_soc / 100.0 * 9.6, 2),
+            "available_energy_kwh": round(batt_soc / 100.0 * battery_kwh, 2),
         },
         "inverter": {
             "temperature_c": round(temp, 1),
             "efficiency_percent": 97.0,
-            "status": "Gerando" if (pv1_w + pv2_w) > 50 else "Standby",
+            "status": "Gerando" if (pv1_w + pv2_w) > 50 else ("Fornecendo" if batt_w < -50 else "Standby"),
             "communication_status": raw.get("_comm_status", "Online"),
-            "operational_state": "Gerando" if (pv1_w + pv2_w) > 50 else "Standby",
+            "operational_state": "Gerando" if (pv1_w + pv2_w) > 50 else ("Fornecendo" if batt_w < -50 else "Standby"),
         },
         "energy": {
             "today_kwh": round(today_kwh, 2),
@@ -187,7 +188,7 @@ def _map_raw_to_snapshot(raw: dict) -> dict:
             "generation_start_time": "--:--",
             "generation_end_time": "--:--",
             "generation_duration_h": 0.0,
-            "battery_available_kwh": round(batt_soc / 100.0 * 9.6, 2),
+            "battery_available_kwh": round(batt_soc / 100.0 * battery_kwh, 2),
             "autonomy_hours": 0.0,
         },
         "operation": {
@@ -223,12 +224,13 @@ class SolarmanLANTransport:
             auto_reconnect=True,
         )
         try:
-            b60   = modbus.read_input_registers(_REG_PV1_V, 4)
-            b90   = modbus.read_input_registers(_REG_TEMP, 1)
-            b109  = modbus.read_input_registers(_REG_TODAY_KWH, 3)
-            b183  = modbus.read_input_registers(_REG_BATT_V, 8)
-            b1167 = modbus.read_input_registers(_REG_GRID_W, 6)
-            b1199 = modbus.read_input_registers(_REG_LOAD_W, 1)
+            b60   = modbus.read_holding_registers(_REG_PV1_V, 4)      # 60-63
+            b79   = modbus.read_holding_registers(_REG_GRID_HZ, 1)    # 79
+            b90   = modbus.read_holding_registers(_REG_TEMP, 1)        # 90
+            b109  = modbus.read_holding_registers(_REG_TODAY_KWH, 3)  # 109-111
+            b150  = modbus.read_holding_registers(_REG_GRID_V, 20)    # 150-169
+            b175  = modbus.read_holding_registers(_REG_LOAD_W, 1)     # 175
+            b183  = modbus.read_holding_registers(_REG_BATT_V, 8)     # 183-190
         finally:
             try:
                 modbus.disconnect()
@@ -240,18 +242,18 @@ class SolarmanLANTransport:
             "pv1_a_raw":     b60[1],
             "pv2_v_raw":     b60[2],
             "pv2_a_raw":     b60[3],
+            "grid_hz_raw":   b79[0],
             "temp_raw":      b90[0],
             "today_kwh_raw": b109[0],
             "total_kwh_raw": b109[2],
+            "grid_v_raw":    b150[0],   # reg150
+            "grid_w_raw":    b150[19],  # reg169 = 150+19
+            "load_w_raw":    b175[0],
             "batt_v_raw":    b183[0],
             "batt_soc_raw":  b183[1],
             "pv1_w_raw":     b183[3],
             "pv2_w_raw":     b183[4],
             "batt_w_raw":    b183[7],
-            "grid_w_raw":    b1167[0],
-            "grid_v_raw":    b1167[4],
-            "grid_hz_raw":   b1167[5],
-            "load_w_raw":    b1199[0],
         }
 
 
@@ -328,8 +330,8 @@ class SolarmanCloudTransport:
             "pv2_a_raw":     int(_f("PV2Curr") * 10),
             "pv1_w_raw":     int(_f("PV1Power")),
             "pv2_w_raw":     int(_f("PV2Power")),
-            "temp_raw":      int(_f("DC_Temp") * 10),
-            "batt_v_raw":    int(_f("BatVolt") * 10),
+            "temp_raw":      int(_f("DC_Temp") * 10) + 1000,
+            "batt_v_raw":    int(_f("BatVolt") * 100),
             "batt_soc_raw":  int(_f("BatCapcity")),
             "batt_w_raw":    int(batt_kw * 1000),
             "grid_w_raw":    int(grid_kw * 1000),
@@ -355,6 +357,7 @@ class DeyeSolarmanReader:
     def __init__(self, solarman_cfg: dict, memory_size: int = 1024):
         self._cfg = solarman_cfg
         self._memory_size = memory_size
+        self._battery_kwh = float(solarman_cfg.get("battery_capacity_kwh", 9.6))
         self._memory_buffer: list = []
         self.last_payload: dict = {}
         self._lan_fail_count: int = 0
@@ -411,7 +414,7 @@ class DeyeSolarmanReader:
 
     def read_all(self) -> dict:
         raw = self._read_raw()
-        data = _map_raw_to_snapshot(raw)
+        data = _map_raw_to_snapshot(raw, battery_kwh=self._battery_kwh)
         self.last_payload = data
         self._memory_buffer.append(data)
         if len(self._memory_buffer) > self._memory_size:

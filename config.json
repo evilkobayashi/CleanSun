@@ -1,34 +1,38 @@
 {
   "tarifa_kwh": 0.92,
   "potencia_sistema_kwp": 7.5,
-  "nome_instalacao": "Residência TCC",
+  "nome_instalacao": "Demo — Deye SUN-7.5K",
   "history_max_bytes": 524288,
   "projection_factor_year": 30,
   "alert_generation_gap_pct": 15,
   "alert_night_import_kw": 1.2,
   "data_stale_seconds": 20,
-  "manual_override": false,
-  "manual_selected_type": null,
-  "detected_inverter_type": null,
-  "detection_source": "unknown",
-  "detection_confidence": 0.0,
+  "simulation_anomalies_enabled": true,
+  "simulation_random_fault_rate": 0.04,
+  "manual_override": true,
+  "manual_selected_type": "hybrid",
+  "detected_inverter_type": "hybrid",
+  "detection_source": "model_lookup",
+  "detection_confidence": 0.98,
   "technical_mode_password": "123456",
   "technical_mode_enabled": true,
   "technical_session_timeout_minutes": 120,
+  "simulation_inverter_type": "hybrid",
   "data_source": "solarman",
   "solarman": {
-    "datalogger_ip": "192.168.1.100",
-    "datalogger_serial": 1234567890,
+    "datalogger_ip": "192.168.3.144",
+    "datalogger_serial": 3427615184,
     "datalogger_port": 8899,
     "mb_slaveid": 1,
     "lan_fail_threshold": 3,
+    "battery_capacity_kwh": 14.4,
     "cloud_fallback": {
       "enabled": false,
       "email": "",
       "password": "",
       "app_id": "",
       "app_secret": "",
-      "device_sn": ""
+      "device_sn": "3427615184"
     }
   }
 }

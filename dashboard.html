@@ -312,6 +312,7 @@ function vis_renderFlow(snapshot) {
 function vis_drawChart24h(hourly) {
   const canvas = $('vis24hCanvas');
   if (!canvas) return;
+  if (!canvas.offsetWidth) { requestAnimationFrame(() => vis_drawChart24h(hourly)); return; }
   const dpr = window.devicePixelRatio || 1;
   canvas.width = canvas.offsetWidth * dpr;
   canvas.height = canvas.offsetHeight * dpr;
@@ -371,7 +372,7 @@ function vis_drawChart24h(hourly) {
   }
 
   canvas._vis_gen = genVals; canvas._vis_load = loadVals;
-  canvas._vis_PAD = PAD; canvas._vis_chartW = chartW;
+  canvas._vis_maxVal = maxVal; canvas._vis_PAD = PAD; canvas._vis_chartW = chartW;
 }
 
 (function() {
@@ -379,7 +380,7 @@ function vis_drawChart24h(hourly) {
     const canvas = document.getElementById('vis24hCanvas');
     if (!canvas) return;
     canvas.addEventListener('mousemove', function(e) {
-      if (!canvas._vis_gen) return;
+      if (!canvas._vis_gen || !canvas._vis_PAD) return;
       const rect = canvas.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const PAD = canvas._vis_PAD, chartW = canvas._vis_chartW;
@@ -437,6 +438,7 @@ function vis_renderDonuts(indicators) {
   const imp = Number(indicators.importado_kwh || 0);
   const selfConsumption = Math.max(0, gen - exp);
 
+  // battCharge segment omitted — not yet in indicators API
   vis_drawDonut($('visDonutProd'), [
     { value: exp, color: '#3b82f6' },
     { value: selfConsumption, color: '#f59e0b' }

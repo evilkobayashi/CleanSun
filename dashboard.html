@@ -226,7 +226,19 @@ function closeTechModal(){$('techModal').classList.remove('visible')}
 async function loginTechnical(){const password=$('techPassword').value;const r=await fetch('/api/auth/technical-login',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({password})});const payload=await r.json();if(!r.ok){$('authError').textContent=payload.message||'Senha incorreta.';return}authStatus=payload;closeTechModal();applyAuthState();setMode('tech');await loadDashboard()}
 async function logoutTechnical(){await fetch('/api/auth/technical-logout',{method:'POST',credentials:'same-origin'});authStatus={...authStatus,authenticated:false};setMode('visual');applyAuthState();await loadDashboard()}
 document.querySelectorAll('[data-days]').forEach(btn=>btn.onclick=()=>{document.querySelectorAll('[data-days]').forEach(x=>x.classList.remove('active'));btn.classList.add('active');days=Number(btn.dataset.days);loadDashboard()});document.querySelectorAll('[data-sev]').forEach(btn=>btn.onclick=()=>{document.querySelectorAll('[data-sev]').forEach(x=>x.classList.remove('active'));btn.classList.add('active');sev=btn.dataset.sev;renderAlerts(window.__lastData?.dashboard?.alerts||[])});document.querySelectorAll('[data-tech-sev]').forEach(btn=>btn.onclick=()=>{document.querySelectorAll('[data-tech-sev]').forEach(x=>x.classList.remove('active'));btn.classList.add('active');techSev=btn.dataset.techSev;renderTechAlerts(window.__lastData?.dashboard?.alerts||[])});document.querySelectorAll('[data-inverter]').forEach(btn=>btn.onclick=()=>syncInverterType(btn.dataset.inverter));$('btnClearOverride').onclick=()=>clearOverride();$('btnTechLogout').onclick=()=>logoutTechnical();$('btnSubmitTechLogin').onclick=()=>loginTechnical();$('btnCancelTechLogin').onclick=()=>closeTechModal();$('techPassword').addEventListener('keydown',e=>{if(e.key==='Enter')loginTechnical()});$('techModal').addEventListener('click',e=>{if(e.target.id==='techModal')closeTechModal()});
-function vis_onTabActivated() { /* populated in later tasks */ }
+function vis_onTabActivated() {
+  if (window.__lastData) {
+    const d = window.__lastData;
+    const ind = (d.dashboard || {}).indicators || {};
+    vis_renderStats(d.snapshot || {}, vis_historyRows);
+    vis_renderBattery(d.snapshot || {});
+    vis_renderFlow(d.snapshot || {});
+    vis_drawChart24h(ind.hourly || {});
+    vis_renderDonuts(ind);
+    vis_drawHistory(vis_historyRows);
+  }
+  vis_loadHistory();
+}
 function vis_renderStats(snapshot, historyRows) {
   const totalKwh = Number(snapshot.geracao_total_kwh || 0);
   const exportKwh = Number((window.__lastData?.dashboard?.indicators || {}).exportado_kwh || 0);
@@ -459,7 +471,72 @@ function vis_renderDonuts(indicators) {
     '<span style="color:#ef4444">▪</span> Rede: ' + imp.toFixed(1) + ' kWh';
 }
 
-async function connect(){await initializeInverterType();setMode('visual');if(!window.EventSource){await loadDashboard();return setInterval(loadDashboard,5000)}const es=new EventSource('/api/events');es.onopen=()=>{$('conn').textContent='Sistema online'};es.addEventListener('update',ev=>{applyDashboard(JSON.parse(ev.data));$('conn').textContent='Sistema online'});es.onerror=()=>{$('conn').textContent='SSE indisponível';es.close();loadDashboard();setInterval(loadDashboard,5000)}}connect();
+function vis_drawHistory(rows) {
+  const canvas = $('visHistCanvas');
+  if (!canvas) return;
+  if (!canvas.offsetWidth) { requestAnimationFrame(() => vis_drawHistory(rows)); return; }
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = canvas.offsetWidth * dpr;
+  canvas.height = canvas.offsetHeight * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  const W = canvas.offsetWidth, H = canvas.offsetHeight;
+  const PAD = { top: 10, right: 10, bottom: 28, left: 36 };
+  const chartW = W - PAD.left - PAD.right;
+  const chartH = H - PAD.top - PAD.bottom;
+
+  const data = (rows || []).slice(-30);
+  if (!data.length) return;
+  const maxVal = Math.max(0.5, ...data.map(r => Math.max(Number(r.geracao_kwh || 0), Number(r.consumo_kwh || 0))));
+  const n = data.length;
+  const barGroupW = chartW / n;
+  const barW = Math.max(2, barGroupW * 0.35);
+
+  ctx.clearRect(0, 0, W, H);
+
+  ctx.strokeStyle = '#f3f4f6'; ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = PAD.top + (chartH / 4) * i;
+    ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(W - PAD.right, y); ctx.stroke();
+  }
+
+  data.forEach((row, i) => {
+    const gen = Number(row.geracao_kwh || 0);
+    const cons = Number(row.consumo_kwh || 0);
+    const x = PAD.left + i * barGroupW + barGroupW / 2;
+    const genH = (gen / maxVal) * chartH;
+    const consH = (cons / maxVal) * chartH;
+    ctx.fillStyle = '#3b82f6';
+    ctx.fillRect(x - barW - 1, PAD.top + chartH - genH, barW, genH);
+    ctx.fillStyle = '#ef4444';
+    ctx.fillRect(x + 1, PAD.top + chartH - consH, barW, consH);
+    if (i % 5 === 0 || i === n - 1) {
+      ctx.fillStyle = '#9ca3af'; ctx.font = '9px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(row.label || (i + 1), x, H - 4);
+    }
+  });
+
+  ctx.fillStyle = '#9ca3af'; ctx.font = '9px sans-serif'; ctx.textAlign = 'right';
+  for (let i = 0; i <= 4; i++) {
+    const v = maxVal * (1 - i / 4);
+    const y = PAD.top + (chartH / 4) * i;
+    ctx.fillText(v.toFixed(1), PAD.left - 4, y + 3);
+  }
+}
+
+async function vis_loadHistory() {
+  try {
+    const r = await fetch('/api/history?days=30&bucket=daily', { credentials: 'same-origin' });
+    const data = await r.json();
+    vis_historyRows = data.rows || [];
+    vis_drawHistory(vis_historyRows);
+    vis_renderStats(window.__lastData?.snapshot || {}, vis_historyRows);
+  } catch (e) { /* silent */ }
+}
+
+async function connect(){await initializeInverterType();setMode('visual');if(!window.EventSource){await loadDashboard();return setInterval(loadDashboard,5000)}const es=new EventSource('/api/events');es.onopen=()=>{$('conn').textContent='Sistema online'};es.addEventListener('update',ev=>{applyDashboard(JSON.parse(ev.data));$('conn').textContent='Sistema online'});es.onerror=()=>{$('conn').textContent='SSE indisponível';es.close();loadDashboard();setInterval(loadDashboard,5000)};
+// Refresh history every 5 minutes when on Visual tab
+setInterval(() => { if (mode === 'visual') vis_loadHistory(); }, 5 * 60 * 1000);}connect();
 </script>
 </body>
 </html>

@@ -19,7 +19,16 @@
 /* tab toggle */
 .tab-toggle{display:flex;gap:0;border-radius:10px;overflow:hidden;border:1px solid #e5e7eb}
 .tab-toggle button{padding:8px 20px;border:none;background:#f9fafb;color:#6b7280;font:inherit;font-size:13px;cursor:pointer;transition:all .15s}
-.tab-toggle button.active{background:#fff;color:#111827;font-weight:600;box-shadow:0 1px 4px rgba(0,0,0,.1)}</style>
+.tab-toggle button.active{background:#fff;color:#111827;font-weight:600;box-shadow:0 1px 4px rgba(0,0,0,.1)}
+/* ── Flow diagram ── */
+.vis-flow-wrap{position:relative;width:100%;height:200px}
+.vis-node{position:absolute;text-align:center;width:64px;transform:translateX(-50%)}
+.vis-node-icon{font-size:28px;line-height:1}
+.vis-node-val{font-size:12px;font-weight:700;margin-top:2px}
+.vis-node-lbl{font-size:10px;color:#9ca3af}
+.vis-flow-svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+@keyframes vis-dot-move{to{offset-distance:100%}}
+.vis-dot{position:absolute;width:8px;height:8px;border-radius:50%;offset-distance:0%;animation:vis-dot-move 1.8s linear infinite}</style>
 </head>
 <body class="tab-visual">
 <div class="wrap"><div class="shell" id="appShell">
@@ -85,6 +94,51 @@
         <div id="visStat4" style="font-size:26px;font-weight:700;color:#10b981">-- T</div>
       </div>
     </div>
+    <!-- ② Flow + Battery row -->
+    <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:16px">
+      <div class="vis-card" id="visFlow">
+        <div class="vis-label" style="margin-bottom:12px">Fluxo de energia</div>
+        <div class="vis-flow-wrap" id="visFlowWrap">
+          <svg class="vis-flow-svg" id="visFlowSvg"></svg>
+          <div class="vis-node" id="vfSolar" style="left:12%;top:20px">
+            <div class="vis-node-icon">☀️</div>
+            <div class="vis-node-val" id="vfSolarVal" style="color:#f59e0b">0W</div>
+            <div class="vis-node-lbl">Solar</div>
+          </div>
+          <div class="vis-node" id="vfCasa" style="left:50%;top:70px">
+            <div class="vis-node-icon">🏠</div>
+            <div class="vis-node-val" style="color:#374151">Casa</div>
+          </div>
+          <div class="vis-node" id="vfBatt" style="left:25%;top:130px">
+            <div class="vis-node-icon">🔋</div>
+            <div class="vis-node-val" id="vfBattVal" style="color:#10b981">0W</div>
+            <div class="vis-node-lbl">Bateria</div>
+          </div>
+          <div class="vis-node" id="vfRede" style="left:75%;top:20px">
+            <div class="vis-node-icon">⚡</div>
+            <div class="vis-node-val" id="vfRedeVal" style="color:#3b82f6">0W</div>
+            <div class="vis-node-lbl">Rede</div>
+          </div>
+          <div class="vis-node" id="vfLoad" style="left:75%;top:130px">
+            <div class="vis-node-icon">🏭</div>
+            <div class="vis-node-val" id="vfLoadVal" style="color:#ef4444">0W</div>
+            <div class="vis-node-lbl">Consumo</div>
+          </div>
+        </div>
+      </div>
+      <div class="vis-card" id="visBattCard">
+        <div class="vis-label" style="margin-bottom:8px">Bateria</div>
+        <div id="visBattSoc" style="font-size:42px;font-weight:700;text-align:center;margin:8px 0">--%</div>
+        <div style="background:#e5e7eb;border-radius:999px;height:8px;margin-bottom:10px">
+          <div id="visBattBar" style="height:100%;border-radius:999px;background:#10b981;width:0%;transition:width .5s"></div>
+        </div>
+        <div id="visBattMode" style="font-size:13px;font-weight:600;text-align:center;margin-bottom:6px">--</div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:#6b7280">
+          <span id="visBattKw">-- kW</span>
+          <span id="visBattKwh">-- kWh disp.</span>
+        </div>
+      </div>
+    </div>
   </div>
 </div></div>
 
@@ -114,7 +168,7 @@ function applyInverterButtons(){document.querySelectorAll('[data-inverter]').for
 function renderDetectionStatus(){const detected=detectionStatus.detected_inverter_type||'não identificado';const sourceMap={model_lookup:'modelo do equipamento',family_lookup:'família do equipamento',serial_lookup:'tabela de série',telemetry_inference:'inferência por telemetria',unknown:'desconhecido'};$('detectionInfo').textContent=`Tipo detectado: ${detected} · Origem: ${sourceMap[detectionStatus.detection_source]||detectionStatus.detection_source||'--'} · Confiança: ${detectionStatus.confidence_label||'baixa'}${detectionStatus.manual_override?` · Override manual: ${detectionStatus.manual_selected_type}`:' · Override manual: inativo'}`;$('btnClearOverride').classList.toggle('active',!!detectionStatus.manual_override)}
 function configureLayout(dashboard,ind,status){const tech=dashboard.technical||{}, battery=tech.battery||{}, operation=tech.operation||{};$('pvNow').textContent=fmtN(ind.potencia_atual_kw)+' kW';$('loadNow').textContent=fmtN(ind.consumo_atual_kw)+' kW';if(inverterType==='on-grid'){$('card1Title').textContent='Geração do dia';$('card1Value').textContent=fmtN(ind.geracao_kwh)+' kWh';$('card1Strong').textContent='Clima: '+(ind.weather_label||'--');$('card2Title').textContent='Economia do dia';$('card2Value').textContent='R$ '+fmtN(ind.economia_diaria_rs);$('card2Strong').textContent='Mês: R$ '+fmtN(ind.economia_mensal_rs);$('card2Sub').textContent='Ano: R$ '+fmtN(ind.economia_anual_rs);$('card3Title').textContent='Troca com a rede';$('card3Value').textContent=fmtN(ind.exportado_kwh)+' kWh';$('card3Strong').textContent='Importada: '+fmtN(ind.importado_kwh)+' kWh';$('flowMidLabel').textContent='Carga';$('flowEndLabel').textContent='Rede';$('gridNow').textContent=(ind.importacao_atual_kw>0?'+':'-')+fmtN(Math.max(ind.importacao_atual_kw,ind.exportacao_atual_kw))+' kW';$('miniTitle1').textContent='Autoconsumo';$('gaugeValue').textContent=fmtP(ind.autoconsumo_pct);$('gaugeLabel').textContent='Solar';$('miniTitle2').textContent='Performance ratio';$('prValue').textContent=fmtN(ind.performance_ratio);$('diffExp').textContent=fmtP(ind.diferenca_geracao_pct);setMiniRows([['Autossuficiência',fmtP(ind.autossuficiencia_pct)],['Importação atual',fmtN(ind.importacao_atual_kw)+' kW'],['Exportação atual',fmtN(ind.exportacao_atual_kw)+' kW']],[['Status',status.operational_state||'--'],['Alarmes ativos',String(status.active_alarm_count||0)],['Críticos',String(status.critical_alarm_count||0)]]);}else if(inverterType==='off-grid'){$('card1Title').textContent='Geração solar';$('card1Value').textContent=fmtN(ind.geracao_kwh)+' kWh';$('card1Strong').textContent='Clima: '+(ind.weather_label||'--');$('card2Title').textContent='Bateria (SOC)';$('card2Value').textContent=fmtN(battery.soc_percent)+'%';$('card2Strong').textContent='Modo: '+(battery.mode||'idle');$('card2Sub').textContent='Energia disponível: '+fmtN(battery.available_energy_kwh)+' kWh';$('card3Title').textContent='Autonomia estimada';$('card3Value').textContent=fmtN(battery.autonomy_hours)+' h';$('card3Strong').textContent='Tensão: '+fmtN(battery.voltage_v)+' V';$('flowMidLabel').textContent='Bateria';$('flowEndLabel').textContent='Cargas';$('gridNow').textContent=fmtN(operation.load_power_kw)+' kW';$('loadNow').textContent=fmtN(battery.power_kw)+' kW';$('miniTitle1').textContent='Bateria';$('gaugeValue').textContent=fmtN(battery.soc_percent)+'%';$('gaugeLabel').textContent='SOC';$('miniTitle2').textContent='Operação isolada';$('prValue').textContent=fmtN(operation.load_power_kw);$('diffExp').textContent='Carga';setMiniRows([['Tensão',fmtN(battery.voltage_v)+' V'],['Corrente',fmtN(battery.current_a)+' A'],['Potência',fmtN(battery.power_kw)+' kW']],[['Modo',operation.operating_mode||'--'],['Backup',operation.backup_mode_active?'Ativo':'Inativo'],['Alarmes ativos',String(status.active_alarm_count||0)]]);}else{$('card1Title').textContent='Geração do dia';$('card1Value').textContent=fmtN(ind.geracao_kwh)+' kWh';$('card1Strong').textContent='Clima: '+(ind.weather_label||'--');$('card2Title').textContent='Bateria (SOC)';$('card2Value').textContent=fmtN(battery.soc_percent)+'%';$('card2Strong').textContent='Modo: '+(battery.mode||'idle');$('card2Sub').textContent='Autonomia: '+fmtN(battery.autonomy_hours)+' h';$('card3Title').textContent='Troca com a rede';$('card3Value').textContent=fmtN(ind.exportado_kwh)+' kWh';$('card3Strong').textContent='Importada: '+fmtN(ind.importado_kwh)+' kWh';$('flowMidLabel').textContent='Bateria';$('flowEndLabel').textContent='Rede';$('gridNow').textContent=(ind.importacao_atual_kw>0?'+':'-')+fmtN(Math.max(ind.importacao_atual_kw,ind.exportacao_atual_kw))+' kW';$('loadNow').textContent=fmtN(battery.power_kw)+' kW';$('miniTitle1').textContent='Participação energética';$('gaugeValue').textContent=fmtP(ind.autoconsumo_pct);$('gaugeLabel').textContent='Solar';$('miniTitle2').textContent='Modo híbrido';$('prValue').textContent=fmtN(ind.performance_ratio);$('diffExp').textContent=fmtP(ind.diferenca_geracao_pct);setMiniRows([['Rede',fmtN(ind.importacao_atual_kw)+' kW'],['Bateria',fmtN(battery.power_kw)+' kW'],['Autonomia',fmtN(battery.autonomy_hours)+' h']],[['Modo',operation.operating_mode||'--'],['Backup',operation.backup_mode_active?'Ativo':'Inativo'],['Alarmes ativos',String(status.active_alarm_count||0)]]);} $('gauge').style.setProperty('--gauge',Math.max(0,Math.min(100,Number((inverterType==='off-grid'?battery.soc_percent:ind.autoconsumo_pct)||0)))+'%')}
 function applyAuthState(){document.body.classList.toggle('tech-authenticated',!!authStatus.authenticated);$('techPanel').classList.toggle('hidden',mode!=='tech'||!authStatus.authenticated);$('technicalAccessPanel').classList.toggle('hidden',!authStatus.authenticated||mode!=='tech');$('btnTechLogout').classList.toggle('hidden',!authStatus.authenticated);$('techLockState').textContent=authStatus.authenticated?'Técnico liberado':'Técnico bloqueado';$('techLockState').className=authStatus.authenticated?'success-chip':'lock-chip';$('authSummary').textContent=authStatus.authenticated?'Modo técnico autenticado. Ajustes avançados e override do inversor liberados.':'Área técnica protegida por senha. O painel abre em modo visual.';$('authHint').textContent=authStatus.authenticated?'Você pode acessar alarmes avançados, dados elétricos detalhados e a configuração do tipo de inversor.':'Use o acesso técnico apenas para manutenção, diagnóstico e configuração do tipo de inversor.';$('modeBadge').textContent=mode==='tech'&&authStatus.authenticated?'Modo técnico':'Modo visual'}
-function applyDashboard(data){window.__lastData=data;const dashboard=data.dashboard||{},ind=dashboard.indicators||{},reports=dashboard.reports||{},simple=dashboard.simplified||{},profile=dashboard.profile||{},status=dashboard.status||{},tech=dashboard.technical||{},alerts=dashboard.alerts||[];detectionStatus=data.detection_status||dashboard.inverter_detection||detectionStatus;inverterType=detectionStatus.effective_inverter_type||data.inverter_type||dashboard.inverter_type||inverterType;applyInverterButtons();renderDetectionStatus();$('installName').textContent=data.config?.nome_instalacao||'Residência';$('headline').textContent=simple.headline||ind.status_text||'Sem dados';$('subline').textContent=status.status_text||ind.status_text||'Aguardando dados.';$('prStatus').textContent=simple.status_text||ind.status_text||'Sem interpretação';$('updatedAt').textContent=new Date((status.updated_at||data.updated_at||0)*1000).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});configureLayout(dashboard,ind,status);renderAlerts(alerts);renderTechAlerts(alerts);renderReports(reports);renderRecs(profile);renderHourChart(ind.hourly||{});renderWeekBars(data.history_filtered||dashboard.history?.daily||[]);renderTechnical(tech);vis_historyRows=data.history_filtered||dashboard.history?.daily||[];if(mode==='visual')vis_renderStats(data.snapshot||{},vis_historyRows);}
+function applyDashboard(data){window.__lastData=data;const dashboard=data.dashboard||{},ind=dashboard.indicators||{},reports=dashboard.reports||{},simple=dashboard.simplified||{},profile=dashboard.profile||{},status=dashboard.status||{},tech=dashboard.technical||{},alerts=dashboard.alerts||[];detectionStatus=data.detection_status||dashboard.inverter_detection||detectionStatus;inverterType=detectionStatus.effective_inverter_type||data.inverter_type||dashboard.inverter_type||inverterType;applyInverterButtons();renderDetectionStatus();$('installName').textContent=data.config?.nome_instalacao||'Residência';$('headline').textContent=simple.headline||ind.status_text||'Sem dados';$('subline').textContent=status.status_text||ind.status_text||'Aguardando dados.';$('prStatus').textContent=simple.status_text||ind.status_text||'Sem interpretação';$('updatedAt').textContent=new Date((status.updated_at||data.updated_at||0)*1000).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});configureLayout(dashboard,ind,status);renderAlerts(alerts);renderTechAlerts(alerts);renderReports(reports);renderRecs(profile);renderHourChart(ind.hourly||{});renderWeekBars(data.history_filtered||dashboard.history?.daily||[]);renderTechnical(tech);vis_historyRows=data.history_filtered||dashboard.history?.daily||[];if(mode==='visual'){vis_renderStats(data.snapshot||{},vis_historyRows);vis_renderBattery(data.snapshot||{});vis_renderFlow(data.snapshot||{});}}
 async function syncInverterType(nextType,{reload=true}={}){const r=await fetch('/api/inverter-type/override',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({inverter_type:nextType})});const payload=await r.json();if(!r.ok){$('authError').textContent=payload.message||'Faça login técnico para alterar o inversor.';openTechModal();return}detectionStatus=payload;inverterType=detectionStatus.effective_inverter_type||nextType;applyInverterButtons();renderDetectionStatus();if(reload)await loadDashboard()}
 async function clearOverride(){const r=await fetch('/api/inverter-type/clear-override',{method:'POST',credentials:'same-origin'});const payload=await r.json();if(!r.ok){$('authError').textContent=payload.message||'Faça login técnico para limpar o override.';openTechModal();return}detectionStatus=payload;inverterType=detectionStatus.effective_inverter_type||'hybrid';applyInverterButtons();renderDetectionStatus();await loadDashboard()}
 async function initializeInverterType(){const [detectResp,authResp]=await Promise.all([fetch('/api/detection-status',{credentials:'same-origin'}),fetch('/api/auth/technical-status',{credentials:'same-origin'})]);detectionStatus=await detectResp.json();authStatus=await authResp.json();inverterType=detectionStatus.effective_inverter_type||'hybrid';applyInverterButtons();renderDetectionStatus();applyAuthState()}
@@ -150,6 +204,77 @@ function vis_renderStats(snapshot, historyRows) {
   $('visStat2').textContent = exportKwh.toFixed(1) + ' kWh';
   $('visStat3').textContent = activeDays || '--';
   $('visStat4').textContent = co2T + ' T';
+}
+function vis_renderBattery(snapshot) {
+  const batt = snapshot.battery || {};
+  const soc = Number(batt.soc_percent || snapshot.battery_soc_percent || 0);
+  const kw = Number(batt.power_kw || snapshot.battery_power_kw || 0);
+  const kwh = Number(batt.available_energy_kwh || 0);
+  const mode = batt.mode || snapshot.battery_mode || 'idle';
+  const modeMap = { charging: 'Carregando', discharging: 'Descarregando', idle: 'Parado' };
+  const color = soc >= 60 ? '#10b981' : soc >= 30 ? '#f59e0b' : '#ef4444';
+  $('visBattSoc').textContent = soc.toFixed(0) + '%';
+  $('visBattSoc').style.color = color;
+  $('visBattBar').style.width = soc + '%';
+  $('visBattBar').style.background = color;
+  $('visBattMode').textContent = modeMap[mode] || mode;
+  $('visBattMode').style.color = color;
+  $('visBattKw').textContent = Math.abs(kw).toFixed(2) + ' kW';
+  $('visBattKwh').textContent = kwh.toFixed(1) + ' kWh disp.';
+}
+function vis_fmtW(w) {
+  const abs = Math.abs(w);
+  return abs >= 1000 ? (abs/1000).toFixed(1)+'kW' : abs+'W';
+}
+function vis_flowLine(svg, x1pct, y1, x2pct, y2, color, active) {
+  const wrap = $('visFlowWrap');
+  const W = wrap.offsetWidth || 300;
+  const x1 = W * x1pct / 100, x2 = W * x2pct / 100;
+  const id = 'vfl_' + x1pct+'_'+y1+'_'+x2pct+'_'+y2;
+  let path = svg.querySelector('#'+id);
+  if (!path) {
+    path = document.createElementNS('http://www.w3.org/2000/svg','path');
+    path.id = id;
+    path.setAttribute('fill','none');
+    path.setAttribute('stroke-width','2');
+    svg.appendChild(path);
+  }
+  const cx = (x1+x2)/2;
+  path.setAttribute('d', `M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}`);
+  path.setAttribute('stroke', active ? color : '#e5e7eb');
+  path.setAttribute('stroke-dasharray', active ? 'none' : '4 4');
+  const dotId = 'vfd_'+id;
+  let dot = document.getElementById(dotId);
+  if (active) {
+    if (!dot) {
+      dot = document.createElement('div');
+      dot.id = dotId;
+      dot.className = 'vis-dot';
+      dot.style.background = color;
+      dot.style.offsetPath = `path("M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}")`;
+      $('visFlowWrap').appendChild(dot);
+    } else {
+      dot.style.offsetPath = `path("M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}")`;
+      dot.style.display = '';
+    }
+  } else if (dot) {
+    dot.style.display = 'none';
+  }
+}
+function vis_renderFlow(snapshot) {
+  const pvW = Number(snapshot.dc_power_w || 0);
+  const battW = Number(snapshot.battery_power_kw || 0) * 1000;
+  const gridW = Number(snapshot.import_power_w || 0) - Number(snapshot.export_power_w || 0);
+  const loadW = Number(snapshot.load_power_w || 0);
+  $('vfSolarVal').textContent = vis_fmtW(pvW);
+  $('vfBattVal').textContent = (battW > 0 ? '+' : '') + vis_fmtW(battW);
+  $('vfRedeVal').textContent = (gridW > 0 ? '+' : '') + vis_fmtW(gridW);
+  $('vfLoadVal').textContent = vis_fmtW(loadW);
+  const svg = $('visFlowSvg');
+  vis_flowLine(svg, 12, 56, 50, 86, '#f59e0b', pvW > 50);
+  vis_flowLine(svg, 25, 146, 50, 102, '#10b981', Math.abs(battW) > 50);
+  vis_flowLine(svg, 50, 86, 75, 56, gridW < -50 ? '#3b82f6' : '#94a3b8', Math.abs(gridW) > 50);
+  vis_flowLine(svg, 50, 102, 75, 146, '#ef4444', loadW > 50);
 }
 async function connect(){await initializeInverterType();setMode('visual');if(!window.EventSource){await loadDashboard();return setInterval(loadDashboard,5000)}const es=new EventSource('/api/events');es.onopen=()=>{$('conn').textContent='Sistema online'};es.addEventListener('update',ev=>{applyDashboard(JSON.parse(ev.data));$('conn').textContent='Sistema online'});es.onerror=()=>{$('conn').textContent='SSE indisponível';es.close();loadDashboard();setInterval(loadDashboard,5000)}}connect();
 </script>

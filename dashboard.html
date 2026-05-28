@@ -143,8 +143,8 @@ document.querySelectorAll('[data-days]').forEach(btn=>btn.onclick=()=>{document.
 function vis_onTabActivated() { /* populated in later tasks */ }
 function vis_renderStats(snapshot, historyRows) {
   const totalKwh = Number(snapshot.geracao_total_kwh || 0);
-  const exportKwh = Number((snapshot.energy || {}).export_kwh || snapshot.export_power_w / 1000 || 0);
-  const co2T = (totalKwh * 0.0004).toFixed(2);
+  const exportKwh = Number((window.__lastData?.dashboard?.indicators || {}).exportado_kwh || 0);
+  const co2T=(totalKwh*0.0004).toFixed(2);// 0.4 kg/kWh: Brazilian SIN diesel displacement factor
   const activeDays = (historyRows || []).filter(r => Number(r.geracao_kwh || 0) > 0).length;
   $('visStat1').textContent = totalKwh.toFixed(1) + ' kWh';
   $('visStat2').textContent = exportKwh.toFixed(1) + ' kWh';

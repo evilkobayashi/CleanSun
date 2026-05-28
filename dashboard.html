@@ -139,6 +139,38 @@
         </div>
       </div>
     </div>
+    <!-- ③ Curva 24h -->
+    <div class="vis-card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div class="vis-label">Curva 24h</div>
+        <div style="display:flex;gap:12px;font-size:12px;color:#6b7280">
+          <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#3b82f6;margin-right:4px"></span>Solar</span>
+          <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ef4444;margin-right:4px"></span>Consumo</span>
+        </div>
+      </div>
+      <canvas id="vis24hCanvas" style="width:100%;height:200px"></canvas>
+      <div id="vis24hTooltip" style="position:fixed;background:#111827;color:#fff;padding:4px 8px;border-radius:6px;font-size:12px;pointer-events:none;display:none"></div>
+    </div>
+    <!-- ④ Donuts + Histórico -->
+    <div style="display:grid;grid-template-columns:1fr 2fr;gap:16px;margin-bottom:16px">
+      <div class="vis-card">
+        <div class="vis-label" style="margin-bottom:10px">Energia hoje</div>
+        <div style="text-align:center;margin-bottom:12px">
+          <div style="font-size:11px;color:#6b7280;margin-bottom:4px">Produção</div>
+          <svg id="visDonutProd" width="120" height="120" viewBox="0 0 120 120" style="display:block;margin:0 auto"></svg>
+          <div id="visDonutProdLbl" style="font-size:11px;color:#6b7280;margin-top:4px"></div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:11px;color:#6b7280;margin-bottom:4px">Consumo</div>
+          <svg id="visDonutCons" width="120" height="120" viewBox="0 0 120 120" style="display:block;margin:0 auto"></svg>
+          <div id="visDonutConsLbl" style="font-size:11px;color:#6b7280;margin-top:4px"></div>
+        </div>
+      </div>
+      <div class="vis-card">
+        <div class="vis-label" style="margin-bottom:8px">Histórico mensal</div>
+        <canvas id="visHistCanvas" style="width:100%;height:220px"></canvas>
+      </div>
+    </div>
   </div>
 </div></div>
 
@@ -168,7 +200,7 @@ function applyInverterButtons(){document.querySelectorAll('[data-inverter]').for
 function renderDetectionStatus(){const detected=detectionStatus.detected_inverter_type||'não identificado';const sourceMap={model_lookup:'modelo do equipamento',family_lookup:'família do equipamento',serial_lookup:'tabela de série',telemetry_inference:'inferência por telemetria',unknown:'desconhecido'};$('detectionInfo').textContent=`Tipo detectado: ${detected} · Origem: ${sourceMap[detectionStatus.detection_source]||detectionStatus.detection_source||'--'} · Confiança: ${detectionStatus.confidence_label||'baixa'}${detectionStatus.manual_override?` · Override manual: ${detectionStatus.manual_selected_type}`:' · Override manual: inativo'}`;$('btnClearOverride').classList.toggle('active',!!detectionStatus.manual_override)}
 function configureLayout(dashboard,ind,status){const tech=dashboard.technical||{}, battery=tech.battery||{}, operation=tech.operation||{};$('pvNow').textContent=fmtN(ind.potencia_atual_kw)+' kW';$('loadNow').textContent=fmtN(ind.consumo_atual_kw)+' kW';if(inverterType==='on-grid'){$('card1Title').textContent='Geração do dia';$('card1Value').textContent=fmtN(ind.geracao_kwh)+' kWh';$('card1Strong').textContent='Clima: '+(ind.weather_label||'--');$('card2Title').textContent='Economia do dia';$('card2Value').textContent='R$ '+fmtN(ind.economia_diaria_rs);$('card2Strong').textContent='Mês: R$ '+fmtN(ind.economia_mensal_rs);$('card2Sub').textContent='Ano: R$ '+fmtN(ind.economia_anual_rs);$('card3Title').textContent='Troca com a rede';$('card3Value').textContent=fmtN(ind.exportado_kwh)+' kWh';$('card3Strong').textContent='Importada: '+fmtN(ind.importado_kwh)+' kWh';$('flowMidLabel').textContent='Carga';$('flowEndLabel').textContent='Rede';$('gridNow').textContent=(ind.importacao_atual_kw>0?'+':'-')+fmtN(Math.max(ind.importacao_atual_kw,ind.exportacao_atual_kw))+' kW';$('miniTitle1').textContent='Autoconsumo';$('gaugeValue').textContent=fmtP(ind.autoconsumo_pct);$('gaugeLabel').textContent='Solar';$('miniTitle2').textContent='Performance ratio';$('prValue').textContent=fmtN(ind.performance_ratio);$('diffExp').textContent=fmtP(ind.diferenca_geracao_pct);setMiniRows([['Autossuficiência',fmtP(ind.autossuficiencia_pct)],['Importação atual',fmtN(ind.importacao_atual_kw)+' kW'],['Exportação atual',fmtN(ind.exportacao_atual_kw)+' kW']],[['Status',status.operational_state||'--'],['Alarmes ativos',String(status.active_alarm_count||0)],['Críticos',String(status.critical_alarm_count||0)]]);}else if(inverterType==='off-grid'){$('card1Title').textContent='Geração solar';$('card1Value').textContent=fmtN(ind.geracao_kwh)+' kWh';$('card1Strong').textContent='Clima: '+(ind.weather_label||'--');$('card2Title').textContent='Bateria (SOC)';$('card2Value').textContent=fmtN(battery.soc_percent)+'%';$('card2Strong').textContent='Modo: '+(battery.mode||'idle');$('card2Sub').textContent='Energia disponível: '+fmtN(battery.available_energy_kwh)+' kWh';$('card3Title').textContent='Autonomia estimada';$('card3Value').textContent=fmtN(battery.autonomy_hours)+' h';$('card3Strong').textContent='Tensão: '+fmtN(battery.voltage_v)+' V';$('flowMidLabel').textContent='Bateria';$('flowEndLabel').textContent='Cargas';$('gridNow').textContent=fmtN(operation.load_power_kw)+' kW';$('loadNow').textContent=fmtN(battery.power_kw)+' kW';$('miniTitle1').textContent='Bateria';$('gaugeValue').textContent=fmtN(battery.soc_percent)+'%';$('gaugeLabel').textContent='SOC';$('miniTitle2').textContent='Operação isolada';$('prValue').textContent=fmtN(operation.load_power_kw);$('diffExp').textContent='Carga';setMiniRows([['Tensão',fmtN(battery.voltage_v)+' V'],['Corrente',fmtN(battery.current_a)+' A'],['Potência',fmtN(battery.power_kw)+' kW']],[['Modo',operation.operating_mode||'--'],['Backup',operation.backup_mode_active?'Ativo':'Inativo'],['Alarmes ativos',String(status.active_alarm_count||0)]]);}else{$('card1Title').textContent='Geração do dia';$('card1Value').textContent=fmtN(ind.geracao_kwh)+' kWh';$('card1Strong').textContent='Clima: '+(ind.weather_label||'--');$('card2Title').textContent='Bateria (SOC)';$('card2Value').textContent=fmtN(battery.soc_percent)+'%';$('card2Strong').textContent='Modo: '+(battery.mode||'idle');$('card2Sub').textContent='Autonomia: '+fmtN(battery.autonomy_hours)+' h';$('card3Title').textContent='Troca com a rede';$('card3Value').textContent=fmtN(ind.exportado_kwh)+' kWh';$('card3Strong').textContent='Importada: '+fmtN(ind.importado_kwh)+' kWh';$('flowMidLabel').textContent='Bateria';$('flowEndLabel').textContent='Rede';$('gridNow').textContent=(ind.importacao_atual_kw>0?'+':'-')+fmtN(Math.max(ind.importacao_atual_kw,ind.exportacao_atual_kw))+' kW';$('loadNow').textContent=fmtN(battery.power_kw)+' kW';$('miniTitle1').textContent='Participação energética';$('gaugeValue').textContent=fmtP(ind.autoconsumo_pct);$('gaugeLabel').textContent='Solar';$('miniTitle2').textContent='Modo híbrido';$('prValue').textContent=fmtN(ind.performance_ratio);$('diffExp').textContent=fmtP(ind.diferenca_geracao_pct);setMiniRows([['Rede',fmtN(ind.importacao_atual_kw)+' kW'],['Bateria',fmtN(battery.power_kw)+' kW'],['Autonomia',fmtN(battery.autonomy_hours)+' h']],[['Modo',operation.operating_mode||'--'],['Backup',operation.backup_mode_active?'Ativo':'Inativo'],['Alarmes ativos',String(status.active_alarm_count||0)]]);} $('gauge').style.setProperty('--gauge',Math.max(0,Math.min(100,Number((inverterType==='off-grid'?battery.soc_percent:ind.autoconsumo_pct)||0)))+'%')}
 function applyAuthState(){document.body.classList.toggle('tech-authenticated',!!authStatus.authenticated);$('techPanel').classList.toggle('hidden',mode!=='tech'||!authStatus.authenticated);$('technicalAccessPanel').classList.toggle('hidden',!authStatus.authenticated||mode!=='tech');$('btnTechLogout').classList.toggle('hidden',!authStatus.authenticated);$('techLockState').textContent=authStatus.authenticated?'Técnico liberado':'Técnico bloqueado';$('techLockState').className=authStatus.authenticated?'success-chip':'lock-chip';$('authSummary').textContent=authStatus.authenticated?'Modo técnico autenticado. Ajustes avançados e override do inversor liberados.':'Área técnica protegida por senha. O painel abre em modo visual.';$('authHint').textContent=authStatus.authenticated?'Você pode acessar alarmes avançados, dados elétricos detalhados e a configuração do tipo de inversor.':'Use o acesso técnico apenas para manutenção, diagnóstico e configuração do tipo de inversor.';$('modeBadge').textContent=mode==='tech'&&authStatus.authenticated?'Modo técnico':'Modo visual'}
-function applyDashboard(data){window.__lastData=data;const dashboard=data.dashboard||{},ind=dashboard.indicators||{},reports=dashboard.reports||{},simple=dashboard.simplified||{},profile=dashboard.profile||{},status=dashboard.status||{},tech=dashboard.technical||{},alerts=dashboard.alerts||[];detectionStatus=data.detection_status||dashboard.inverter_detection||detectionStatus;inverterType=detectionStatus.effective_inverter_type||data.inverter_type||dashboard.inverter_type||inverterType;applyInverterButtons();renderDetectionStatus();$('installName').textContent=data.config?.nome_instalacao||'Residência';$('headline').textContent=simple.headline||ind.status_text||'Sem dados';$('subline').textContent=status.status_text||ind.status_text||'Aguardando dados.';$('prStatus').textContent=simple.status_text||ind.status_text||'Sem interpretação';$('updatedAt').textContent=new Date((status.updated_at||data.updated_at||0)*1000).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});configureLayout(dashboard,ind,status);renderAlerts(alerts);renderTechAlerts(alerts);renderReports(reports);renderRecs(profile);renderHourChart(ind.hourly||{});renderWeekBars(data.history_filtered||dashboard.history?.daily||[]);renderTechnical(tech);vis_historyRows=data.history_filtered||dashboard.history?.daily||[];if(mode==='visual'){vis_renderStats(data.snapshot||{},vis_historyRows);vis_renderBattery(data.snapshot||{});vis_renderFlow(data.snapshot||{});}}
+function applyDashboard(data){window.__lastData=data;const dashboard=data.dashboard||{},ind=dashboard.indicators||{},reports=dashboard.reports||{},simple=dashboard.simplified||{},profile=dashboard.profile||{},status=dashboard.status||{},tech=dashboard.technical||{},alerts=dashboard.alerts||[];detectionStatus=data.detection_status||dashboard.inverter_detection||detectionStatus;inverterType=detectionStatus.effective_inverter_type||data.inverter_type||dashboard.inverter_type||inverterType;applyInverterButtons();renderDetectionStatus();$('installName').textContent=data.config?.nome_instalacao||'Residência';$('headline').textContent=simple.headline||ind.status_text||'Sem dados';$('subline').textContent=status.status_text||ind.status_text||'Aguardando dados.';$('prStatus').textContent=simple.status_text||ind.status_text||'Sem interpretação';$('updatedAt').textContent=new Date((status.updated_at||data.updated_at||0)*1000).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});configureLayout(dashboard,ind,status);renderAlerts(alerts);renderTechAlerts(alerts);renderReports(reports);renderRecs(profile);renderHourChart(ind.hourly||{});renderWeekBars(data.history_filtered||dashboard.history?.daily||[]);renderTechnical(tech);vis_historyRows=data.history_filtered||dashboard.history?.daily||[];if(mode==='visual'){vis_renderStats(data.snapshot||{},vis_historyRows);vis_renderBattery(data.snapshot||{});vis_renderFlow(data.snapshot||{});vis_drawChart24h(ind.hourly||{});vis_renderDonuts(ind);}}
 async function syncInverterType(nextType,{reload=true}={}){const r=await fetch('/api/inverter-type/override',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({inverter_type:nextType})});const payload=await r.json();if(!r.ok){$('authError').textContent=payload.message||'Faça login técnico para alterar o inversor.';openTechModal();return}detectionStatus=payload;inverterType=detectionStatus.effective_inverter_type||nextType;applyInverterButtons();renderDetectionStatus();if(reload)await loadDashboard()}
 async function clearOverride(){const r=await fetch('/api/inverter-type/clear-override',{method:'POST',credentials:'same-origin'});const payload=await r.json();if(!r.ok){$('authError').textContent=payload.message||'Faça login técnico para limpar o override.';openTechModal();return}detectionStatus=payload;inverterType=detectionStatus.effective_inverter_type||'hybrid';applyInverterButtons();renderDetectionStatus();await loadDashboard()}
 async function initializeInverterType(){const [detectResp,authResp]=await Promise.all([fetch('/api/detection-status',{credentials:'same-origin'}),fetch('/api/auth/technical-status',{credentials:'same-origin'})]);detectionStatus=await detectResp.json();authStatus=await authResp.json();inverterType=detectionStatus.effective_inverter_type||'hybrid';applyInverterButtons();renderDetectionStatus();applyAuthState()}
@@ -277,6 +309,154 @@ function vis_renderFlow(snapshot) {
   vis_flowLine(svg, 50, 86, 75, 56, gridW < -50 ? '#3b82f6' : '#94a3b8', Math.abs(gridW) > 50);
   vis_flowLine(svg, 50, 102, 75, 146, '#ef4444', loadW > 50);
 }
+function vis_drawChart24h(hourly) {
+  const canvas = $('vis24hCanvas');
+  if (!canvas) return;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = canvas.offsetWidth * dpr;
+  canvas.height = canvas.offsetHeight * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  const W = canvas.offsetWidth, H = canvas.offsetHeight;
+  const PAD = { top: 10, right: 10, bottom: 24, left: 36 };
+  const chartW = W - PAD.left - PAD.right;
+  const chartH = H - PAD.top - PAD.bottom;
+
+  const genVals = [], loadVals = [];
+  for (let i = 0; i < 24; i++) {
+    const h = (hourly || {})[String(i)] || {};
+    genVals.push(Number(h.generation_w || 0) / 1000);
+    loadVals.push(Number(h.consumption_w || 0) / 1000);
+  }
+  const maxVal = Math.max(0.5, ...genVals, ...loadVals);
+
+  function xOf(i) { return PAD.left + (i / 23) * chartW; }
+  function yOf(v) { return PAD.top + chartH - (v / maxVal) * chartH; }
+
+  ctx.clearRect(0, 0, W, H);
+
+  ctx.strokeStyle = '#f3f4f6'; ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = PAD.top + (chartH / 4) * i;
+    ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(W - PAD.right, y); ctx.stroke();
+  }
+
+  function drawArea(vals, lineColor, fillColor) {
+    ctx.beginPath();
+    ctx.moveTo(xOf(0), yOf(vals[0]));
+    for (let i = 1; i < 24; i++) ctx.lineTo(xOf(i), yOf(vals[i]));
+    ctx.lineTo(xOf(23), PAD.top + chartH);
+    ctx.lineTo(xOf(0), PAD.top + chartH);
+    ctx.closePath();
+    ctx.fillStyle = fillColor; ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(xOf(0), yOf(vals[0]));
+    for (let i = 1; i < 24; i++) ctx.lineTo(xOf(i), yOf(vals[i]));
+    ctx.strokeStyle = lineColor; ctx.lineWidth = 2; ctx.stroke();
+  }
+
+  drawArea(loadVals, '#ef4444', 'rgba(239,68,68,.12)');
+  drawArea(genVals, '#3b82f6', 'rgba(59,130,246,.15)');
+
+  ctx.fillStyle = '#9ca3af'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+  [0, 4, 8, 12, 16, 20, 23].forEach(i => {
+    ctx.fillText(i + 'h', xOf(i), H - 4);
+  });
+
+  ctx.textAlign = 'right';
+  for (let i = 0; i <= 4; i++) {
+    const v = maxVal * (1 - i / 4);
+    const y = PAD.top + (chartH / 4) * i;
+    ctx.fillText(v.toFixed(1), PAD.left - 4, y + 3);
+  }
+
+  canvas._vis_gen = genVals; canvas._vis_load = loadVals;
+  canvas._vis_PAD = PAD; canvas._vis_chartW = chartW;
+}
+
+(function() {
+  function attachTooltip() {
+    const canvas = document.getElementById('vis24hCanvas');
+    if (!canvas) return;
+    canvas.addEventListener('mousemove', function(e) {
+      if (!canvas._vis_gen) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const PAD = canvas._vis_PAD, chartW = canvas._vis_chartW;
+      const hour = Math.round((x - PAD.left) / chartW * 23);
+      if (hour < 0 || hour > 23) { $('vis24hTooltip').style.display='none'; return; }
+      const tip = $('vis24hTooltip');
+      tip.style.display = 'block';
+      tip.style.left = (e.clientX + 10) + 'px';
+      tip.style.top = (e.clientY - 28) + 'px';
+      tip.textContent = hour + 'h — Solar: ' + canvas._vis_gen[hour].toFixed(2) + ' kW | Consumo: ' + canvas._vis_load[hour].toFixed(2) + ' kW';
+    });
+    canvas.addEventListener('mouseleave', function() { $('vis24hTooltip').style.display='none'; });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', attachTooltip);
+  } else {
+    attachTooltip();
+  }
+})();
+
+function vis_drawDonut(svgEl, segments, centerLabel) {
+  const R = 44, r = 28, cx = 60, cy = 60;
+  const total = segments.reduce((s, x) => s + x.value, 0) || 1;
+  let angle = -Math.PI / 2;
+  svgEl.innerHTML = '';
+
+  segments.forEach(function(seg) {
+    const frac = seg.value / total;
+    const sweep = frac * 2 * Math.PI;
+    if (frac < 0.001) { angle += sweep; return; }
+    const x1 = cx + R * Math.cos(angle), y1 = cy + R * Math.sin(angle);
+    const x2 = cx + R * Math.cos(angle + sweep), y2 = cy + R * Math.sin(angle + sweep);
+    const xi1 = cx + r * Math.cos(angle), yi1 = cy + r * Math.sin(angle);
+    const xi2 = cx + r * Math.cos(angle + sweep), yi2 = cy + r * Math.sin(angle + sweep);
+    const large = sweep > Math.PI ? 1 : 0;
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', 'M'+x1+','+y1+' A'+R+','+R+' 0 '+large+',1 '+x2+','+y2+' L'+xi2+','+yi2+' A'+r+','+r+' 0 '+large+',0 '+xi1+','+yi1+' Z');
+    path.setAttribute('fill', seg.color);
+    svgEl.appendChild(path);
+    angle += sweep;
+  });
+
+  const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  text.setAttribute('x', cx); text.setAttribute('y', cy + 5);
+  text.setAttribute('text-anchor', 'middle');
+  text.setAttribute('font-size', '13'); text.setAttribute('font-weight', '700');
+  text.setAttribute('fill', '#111827');
+  text.textContent = centerLabel;
+  svgEl.appendChild(text);
+}
+
+function vis_renderDonuts(indicators) {
+  const gen = Number(indicators.geracao_kwh || 0);
+  const exp = Number(indicators.exportado_kwh || 0);
+  const imp = Number(indicators.importado_kwh || 0);
+  const selfConsumption = Math.max(0, gen - exp);
+
+  vis_drawDonut($('visDonutProd'), [
+    { value: exp, color: '#3b82f6' },
+    { value: selfConsumption, color: '#f59e0b' }
+  ], gen.toFixed(1) + ' kWh');
+
+  $('visDonutProdLbl').innerHTML =
+    '<span style="color:#3b82f6">▪</span> Rede: ' + exp.toFixed(1) + ' kWh&nbsp;&nbsp;' +
+    '<span style="color:#f59e0b">▪</span> Auto: ' + selfConsumption.toFixed(1) + ' kWh';
+
+  const cons = Math.max(selfConsumption + imp, 0);
+  vis_drawDonut($('visDonutCons'), [
+    { value: selfConsumption, color: '#f59e0b' },
+    { value: imp, color: '#ef4444' }
+  ], cons.toFixed(1) + ' kWh');
+
+  $('visDonutConsLbl').innerHTML =
+    '<span style="color:#f59e0b">▪</span> Solar: ' + selfConsumption.toFixed(1) + ' kWh&nbsp;&nbsp;' +
+    '<span style="color:#ef4444">▪</span> Rede: ' + imp.toFixed(1) + ' kWh';
+}
+
 async function connect(){await initializeInverterType();setMode('visual');if(!window.EventSource){await loadDashboard();return setInterval(loadDashboard,5000)}const es=new EventSource('/api/events');es.onopen=()=>{$('conn').textContent='Sistema online'};es.addEventListener('update',ev=>{applyDashboard(JSON.parse(ev.data));$('conn').textContent='Sistema online'});es.onerror=()=>{$('conn').textContent='SSE indisponível';es.close();loadDashboard();setInterval(loadDashboard,5000)}}connect();
 </script>
 </body>

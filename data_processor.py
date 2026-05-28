@@ -472,6 +472,26 @@ class DataProcessor:
     def _update_config(self):
         self._write_json(self.config_path, self.config)
 
+    def update_solarman_config(self, ip: str, serial: int) -> dict:
+        ip = str(ip).strip()
+        if not ip:
+            raise ValueError("IP do datalogger não pode ser vazio.")
+        serial = int(serial)
+        if serial <= 0:
+            raise ValueError("Serial do datalogger inválido.")
+        solarman = self.config.setdefault("solarman", {})
+        solarman["datalogger_ip"] = ip
+        solarman["datalogger_serial"] = serial
+        self._update_config()
+        return {"datalogger_ip": ip, "datalogger_serial": serial}
+
+    def get_solarman_config(self) -> dict:
+        solarman = self.config.get("solarman", {})
+        return {
+            "datalogger_ip": solarman.get("datalogger_ip", ""),
+            "datalogger_serial": solarman.get("datalogger_serial", 0),
+        }
+
     def _update_detection(self, snapshot):
         status = detect_inverter_type(snapshot, self.config)
         self.config["detected_inverter_type"] = status.get("detected_inverter_type")

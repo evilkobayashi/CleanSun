@@ -149,6 +149,13 @@ class CleanSunHTTPServer:
                 "/api/history": lambda q: {"days": int(q.get("days", "7")), "bucket": q.get("bucket", "hourly"), "rows": self.processor.history_period(int(q.get("days", "7")), q.get("bucket", "hourly"))},
                 "/api/state": lambda q: self.processor.payload(),
                 "/api/auth/technical-status": lambda q: self._technical_status_payload(authenticated),
+                "/api/v1/auth/technical-status": lambda q: self._technical_status_payload(authenticated),
+                "/api/metrics": lambda q: self._serve_metrics(),
+                "/api/v1/metrics": lambda q: self._serve_metrics(),
+                "/api/health": lambda q: self._health_check(),
+                "/api/v1/health": lambda q: self._health_check(),
+                "/api/config/solarman": lambda q: self.processor.get_solarman_config() if authenticated else {"error": "technical_auth_required"},
+                "/api/v1/config/solarman": lambda q: self.processor.get_solarman_config() if authenticated else {"error": "technical_auth_required"},
             }
 
             if method == "GET":
@@ -220,6 +227,20 @@ class CleanSunHTTPServer:
                     return
                 status = self.processor.clear_manual_override()
                 await self._send(writer, "200 OK", "application/json", json.dumps(status, ensure_ascii=False))
+                return
+
+            if method == "POST" and path in ("/api/config/solarman", "/api/v1/config/solarman"):
+                allowed, error = self._require_technical_auth(headers)
+                if not allowed:
+                    status, payload, extra_headers = error
+                    await self._send(writer, status, "application/json", json.dumps(payload, ensure_ascii=False), extra_headers=extra_headers)
+                    return
+                try:
+                    payload = json.loads(body.decode("utf-8") or "{}") if body else {}
+                    result = self.processor.update_solarman_config(payload.get("datalogger_ip", ""), payload.get("datalogger_serial", 0))
+                    await self._send(writer, "200 OK", "application/json", json.dumps({"ok": True, **result}, ensure_ascii=False))
+                except (ValueError, TypeError) as exc:
+                    await self._send(writer, "400 Bad Request", "application/json", json.dumps({"error": "invalid_input", "message": str(exc)}, ensure_ascii=False))
                 return
 
             await self._send(writer, "405 Method Not Allowed", "application/json", json.dumps({"error": "method_not_allowed"}))

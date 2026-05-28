@@ -242,7 +242,7 @@ function vis_flowLine(svg, x1pct, y1, x2pct, y2, color, active) {
   const cx = (x1+x2)/2;
   path.setAttribute('d', `M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}`);
   path.setAttribute('stroke', active ? color : '#e5e7eb');
-  path.setAttribute('stroke-dasharray', active ? 'none' : '4 4');
+  path.setAttribute('stroke-dasharray', active ? '' : '4 4');
   const dotId = 'vfd_'+id;
   let dot = document.getElementById(dotId);
   if (active) {
@@ -254,7 +254,8 @@ function vis_flowLine(svg, x1pct, y1, x2pct, y2, color, active) {
       dot.style.offsetPath = `path("M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}")`;
       $('visFlowWrap').appendChild(dot);
     } else {
-      dot.style.offsetPath = `path("M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}")`;
+      const newPath = `path("M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}")`;
+      if (dot.style.offsetPath !== newPath) dot.style.offsetPath = newPath;
       dot.style.display = '';
     }
   } else if (dot) {
@@ -262,8 +263,8 @@ function vis_flowLine(svg, x1pct, y1, x2pct, y2, color, active) {
   }
 }
 function vis_renderFlow(snapshot) {
-  const pvW = Number(snapshot.dc_power_w || 0);
-  const battW = Number(snapshot.battery_power_kw || 0) * 1000;
+  const pvW = Number(snapshot.dc_power_w || snapshot.ac_power_w || snapshot.potencia_instantanea_w || 0);
+  const battW = Number(snapshot.battery_power_kw || 0) * 1000; // positive = discharging (Deye convention)
   const gridW = Number(snapshot.import_power_w || 0) - Number(snapshot.export_power_w || 0);
   const loadW = Number(snapshot.load_power_w || 0);
   $('vfSolarVal').textContent = vis_fmtW(pvW);

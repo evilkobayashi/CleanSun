@@ -28,7 +28,12 @@
 .vis-node-lbl{font-size:10px;color:#9ca3af}
 .vis-flow-svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
 @keyframes vis-dot-move{to{offset-distance:100%}}
-.vis-dot{position:absolute;width:8px;height:8px;border-radius:50%;offset-distance:0%;animation:vis-dot-move 1.8s linear infinite}</style>
+.vis-dot{position:absolute;width:8px;height:8px;border-radius:50%;offset-distance:0%;animation:vis-dot-move 1.8s linear infinite}
+@media(max-width:700px){
+  #visTab [style*="grid-template-columns:2fr 1fr"],
+  #visTab [style*="grid-template-columns:1fr 2fr"]{grid-template-columns:1fr!important}
+  .vis-flow-wrap{height:260px}
+}</style>
 </head>
 <body class="tab-visual">
 <div class="wrap"><div class="shell" id="appShell">
@@ -535,6 +540,12 @@ async function vis_loadHistory() {
   } catch (e) { /* silent */ }
 }
 
+window.addEventListener('resize', () => {
+  if (mode !== 'visual' || !window.__lastData) return;
+  const d = window.__lastData;
+  vis_drawChart24h(((d.dashboard || {}).indicators || {}).hourly || {});
+  vis_drawHistory(vis_historyRows);
+});
 async function connect(){await initializeInverterType();setMode('visual');if(!window.EventSource){await loadDashboard();return setInterval(loadDashboard,5000)}const es=new EventSource('/api/events');es.onopen=()=>{$('conn').textContent='Sistema online'};es.addEventListener('update',ev=>{applyDashboard(JSON.parse(ev.data));$('conn').textContent='Sistema online'});es.onerror=()=>{$('conn').textContent='SSE indisponível';es.close();loadDashboard();setInterval(loadDashboard,5000)};
 // Refresh history every 5 minutes when on Visual tab
 setInterval(() => { if (mode === 'visual') vis_loadHistory(); }, 5 * 60 * 1000);}connect();

@@ -540,12 +540,18 @@ async function vis_loadHistory() {
   } catch (e) { /* silent */ }
 }
 
-window.addEventListener('resize', () => {
-  if (mode !== 'visual' || !window.__lastData) return;
-  const d = window.__lastData;
-  vis_drawChart24h(((d.dashboard || {}).indicators || {}).hourly || {});
-  vis_drawHistory(vis_historyRows);
-});
+(function() {
+  let _resizeTimer;
+  window.addEventListener('resize', () => {
+    clearTimeout(_resizeTimer);
+    _resizeTimer = setTimeout(() => {
+      if (mode !== 'visual' || !window.__lastData) return;
+      const d = window.__lastData;
+      vis_drawChart24h(((d.dashboard || {}).indicators || {}).hourly || {});
+      vis_drawHistory(vis_historyRows);
+    }, 150);
+  });
+})();
 async function connect(){await initializeInverterType();setMode('visual');if(!window.EventSource){await loadDashboard();return setInterval(loadDashboard,5000)}const es=new EventSource('/api/events');es.onopen=()=>{$('conn').textContent='Sistema online'};es.addEventListener('update',ev=>{applyDashboard(JSON.parse(ev.data));$('conn').textContent='Sistema online'});es.onerror=()=>{$('conn').textContent='SSE indisponível';es.close();loadDashboard();setInterval(loadDashboard,5000)};
 // Refresh history every 5 minutes when on Visual tab
 setInterval(() => { if (mode === 'visual') vis_loadHistory(); }, 5 * 60 * 1000);}connect();

@@ -191,6 +191,88 @@
   .cs-span-4 { grid-column: span 2; }
 }
 .cs-losango-svg { overflow: visible; }
+
+/* ── #techTab: override all legacy dark CSS classes ── */
+#techTab { color: var(--cs-text); }
+
+/* Gauge — light donut */
+#techTab .gauge {
+  background: conic-gradient(#f59e0b var(--gauge), #e5e7eb 0);
+  width: 100px; height: 100px;
+}
+#techTab .gauge:after { background: #ffffff; }
+#techTab .gauge-center strong { font-size: 20px; color: var(--cs-text); }
+#techTab .gauge-center span { color: #6b7280; }
+#techTab .gauge-card { grid-template-columns: 110px 1fr; }
+
+/* Alert/detail items */
+#techTab .item, #techTab details {
+  background: #f9fafb;
+  border: 1px solid #f3f4f6;
+  border-radius: 10px;
+  color: var(--cs-text);
+}
+#techTab .item strong, #techTab summary { color: var(--cs-text); }
+#techTab .meta, #techTab .row span { color: #6b7280; }
+#techTab .dot { background: #3b82f6; }
+#techTab .item.critical .dot { background: #ef4444; }
+#techTab .item.warning .dot { background: #f59e0b; }
+#techTab .item.info .dot { background: #10b981; }
+
+/* Tech groups cards */
+#techTab .tech-panel { gap: 10px; }
+#techTab .tech-card {
+  background: #f9fafb;
+  border: 1px solid #f3f4f6;
+  border-radius: 10px;
+  padding: 10px;
+}
+#techTab .tech-card h4 { color: #374151; margin: 0 0 8px; }
+#techTab .kv span { color: #6b7280; font-size: 11px; }
+#techTab .kv strong { color: var(--cs-text); font-size: 12px; }
+
+/* Week bars labels */
+#techTab .bar-col { color: #6b7280; }
+#techTab .bar-stack { height: 140px; }
+
+/* Legend */
+#techTab .legend { color: #6b7280; }
+
+/* Row metric items */
+#techTab .row strong { color: var(--cs-text); }
+#techTab .row span { color: #6b7280; }
+
+/* Metric stack */
+#techTab .metric-stack { gap: 8px; flex-direction: column; }
+
+/* Badge overrides for light bg */
+#techTab .badge.critical { background: #fef2f2; color: #991b1b; }
+#techTab .badge.warning  { background: #fffbeb; color: #92400e; }
+#techTab .badge.info     { background: #ecfdf5; color: #065f46; }
+
+/* Buttons inside techTab — light theme */
+#techTab .btn {
+  background: #f3f4f6;
+  color: #374151;
+  border-color: #e5e7eb;
+}
+#techTab .btn:hover { background: #e5e7eb; }
+#techTab .btn.active { background: #dbeafe; color: #1d4ed8; border-color: #93c5fd; }
+#techTab .btn.danger { background: #fef2f2; color: #991b1b; border-color: #fca5a5; }
+#techTab .btn.warn   { background: #fffbeb; color: #92400e; border-color: #fcd34d; }
+
+/* Chart-grid stripe (inside cs-card already has white bg) */
+#techTab .chart-grid {
+  background: linear-gradient(to top, rgba(0,0,0,.03) 1px, transparent 1px);
+  background-size: 100% 25%;
+}
+#techTab .axis-x, #techTab .axis-y { color: #9ca3af; }
+
+/* kpi-value text (legacy class still used by configureLayout) */
+#techTab .kpi-value { color: var(--cs-text); }
+
+/* success/lock chips */
+#techTab .success-chip { background: #ecfdf5; color: #065f46; }
 </style>
 </head>
 <body class="tab-visual">

@@ -237,6 +237,15 @@
       <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="detectionInfo"></div>
     </div>
 
+    <!-- Device info card (auth-gated) -->
+    <div class="cs-card tech-only hidden" id="techDeviceCard" style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div class="cs-label" style="margin:0">Dados do inversor</div>
+        <button class="btn" style="font-size:11px;padding:4px 10px" onclick="tech_fetchInverterConfig()">↻ Atualizar</button>
+      </div>
+      <div id="techDeviceContent"><div style="font-size:11px;color:#9ca3af">Carregando...</div></div>
+    </div>
+
     <!-- Range selector -->
     <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
       <button class="btn active" data-days="1">Hoje</button>
@@ -607,9 +616,11 @@ function applyInverterButtons(){document.querySelectorAll('[data-inverter]').for
 function renderDetectionStatus(){const detected=detectionStatus.detected_inverter_type||'não identificado';const sourceMap={model_lookup:'modelo do equipamento',family_lookup:'família do equipamento',serial_lookup:'tabela de série',telemetry_inference:'inferência por telemetria',unknown:'desconhecido'};$('detectionInfo').textContent=`Tipo detectado: ${detected} · Origem: ${sourceMap[detectionStatus.detection_source]||detectionStatus.detection_source||'--'} · Confiança: ${detectionStatus.confidence_label||'baixa'}${detectionStatus.manual_override?` · Override manual: ${detectionStatus.manual_selected_type}`:' · Override manual: inativo'}`;$('btnClearOverride').classList.toggle('active',!!detectionStatus.manual_override)}
 function configureLayout(dashboard,ind,status){const tech=dashboard.technical||{}, battery=tech.battery||{}, operation=tech.operation||{};$('pvNow').textContent=fmtN(ind.potencia_atual_kw)+' kW';$('loadNow').textContent=fmtN(ind.consumo_atual_kw)+' kW';if(inverterType==='on-grid'){$('card1Title').textContent='Geração do dia';$('card1Value').textContent=fmtN(ind.geracao_kwh)+' kWh';$('card1Strong').textContent='Clima: '+(ind.weather_label||'--');$('card2Title').textContent='Economia do dia';$('card2Value').textContent='R$ '+fmtN(ind.economia_diaria_rs);$('card2Strong').textContent='Mês: R$ '+fmtN(ind.economia_mensal_rs);$('card2Sub').textContent='Ano: R$ '+fmtN(ind.economia_anual_rs);$('card3Title').textContent='Troca com a rede';$('card3Value').textContent=fmtN(ind.exportado_kwh)+' kWh';$('card3Strong').textContent='Importada: '+fmtN(ind.importado_kwh)+' kWh';$('flowMidLabel').textContent='Carga';$('flowEndLabel').textContent='Rede';$('gridNow').textContent=(ind.importacao_atual_kw>0?'+':'-')+fmtN(Math.max(ind.importacao_atual_kw,ind.exportacao_atual_kw))+' kW';$('miniTitle1').textContent='Autoconsumo';$('gaugeValue').textContent=fmtP(ind.autoconsumo_pct);$('gaugeLabel').textContent='Solar';$('miniTitle2').textContent='Performance ratio';$('prValue').textContent=fmtN(ind.performance_ratio);$('diffExp').textContent=fmtP(ind.diferenca_geracao_pct);setMiniRows([['Autossuficiência',fmtP(ind.autossuficiencia_pct)],['Importação atual',fmtN(ind.importacao_atual_kw)+' kW'],['Exportação atual',fmtN(ind.exportacao_atual_kw)+' kW']],[['Status',status.operational_state||'--'],['Alarmes ativos',String(status.active_alarm_count||0)],['Críticos',String(status.critical_alarm_count||0)]]);}else if(inverterType==='off-grid'){$('card1Title').textContent='Geração solar';$('card1Value').textContent=fmtN(ind.geracao_kwh)+' kWh';$('card1Strong').textContent='Clima: '+(ind.weather_label||'--');$('card2Title').textContent='Bateria (SOC)';$('card2Value').textContent=fmtN(battery.soc_percent)+'%';$('card2Strong').textContent='Modo: '+(battery.mode||'idle');$('card2Sub').textContent='Energia disponível: '+fmtN(battery.available_energy_kwh)+' kWh';$('card3Title').textContent='Autonomia estimada';$('card3Value').textContent=fmtN(battery.autonomy_hours)+' h';$('card3Strong').textContent='Tensão: '+fmtN(battery.voltage_v)+' V';$('flowMidLabel').textContent='Bateria';$('flowEndLabel').textContent='Cargas';$('gridNow').textContent=fmtN(operation.load_power_kw)+' kW';$('loadNow').textContent=fmtN(battery.power_kw)+' kW';$('miniTitle1').textContent='Bateria';$('gaugeValue').textContent=fmtN(battery.soc_percent)+'%';$('gaugeLabel').textContent='SOC';$('miniTitle2').textContent='Operação isolada';$('prValue').textContent=fmtN(operation.load_power_kw);$('diffExp').textContent='Carga';setMiniRows([['Tensão',fmtN(battery.voltage_v)+' V'],['Corrente',fmtN(battery.current_a)+' A'],['Potência',fmtN(battery.power_kw)+' kW']],[['Modo',operation.operating_mode||'--'],['Backup',operation.backup_mode_active?'Ativo':'Inativo'],['Alarmes ativos',String(status.active_alarm_count||0)]]);}else{$('card1Title').textContent='Geração do dia';$('card1Value').textContent=fmtN(ind.geracao_kwh)+' kWh';$('card1Strong').textContent='Clima: '+(ind.weather_label||'--');$('card2Title').textContent='Bateria (SOC)';$('card2Value').textContent=fmtN(battery.soc_percent)+'%';$('card2Strong').textContent='Modo: '+(battery.mode||'idle');$('card2Sub').textContent='Autonomia: '+fmtN(battery.autonomy_hours)+' h';$('card3Title').textContent='Troca com a rede';$('card3Value').textContent=fmtN(ind.exportado_kwh)+' kWh';$('card3Strong').textContent='Importada: '+fmtN(ind.importado_kwh)+' kWh';$('flowMidLabel').textContent='Bateria';$('flowEndLabel').textContent='Rede';$('gridNow').textContent=(ind.importacao_atual_kw>0?'+':'-')+fmtN(Math.max(ind.importacao_atual_kw,ind.exportacao_atual_kw))+' kW';$('loadNow').textContent=fmtN(battery.power_kw)+' kW';$('miniTitle1').textContent='Participação energética';$('gaugeValue').textContent=fmtP(ind.autoconsumo_pct);$('gaugeLabel').textContent='Solar';$('miniTitle2').textContent='Modo híbrido';$('prValue').textContent=fmtN(ind.performance_ratio);$('diffExp').textContent=fmtP(ind.diferenca_geracao_pct);setMiniRows([['Rede',fmtN(ind.importacao_atual_kw)+' kW'],['Bateria',fmtN(battery.power_kw)+' kW'],['Autonomia',fmtN(battery.autonomy_hours)+' h']],[['Modo',operation.operating_mode||'--'],['Backup',operation.backup_mode_active?'Ativo':'Inativo'],['Alarmes ativos',String(status.active_alarm_count||0)]]);} $('gauge').style.setProperty('--gauge',Math.max(0,Math.min(100,Number((inverterType==='off-grid'?battery.soc_percent:ind.autoconsumo_pct)||0)))+'%')}
 function applyAuthState(){document.body.classList.toggle('tech-authenticated',!!authStatus.authenticated);$('techPanel').classList.toggle('hidden',mode!=='tech'||!authStatus.authenticated);const tap = $('technicalAccessPanelNew') || $('technicalAccessPanel');
-if (tap) tap.classList.toggle('hidden', !authStatus.authenticated || mode !== 'tech');$('btnTechLogout').classList.toggle('hidden',!authStatus.authenticated);$('techLockState').textContent=authStatus.authenticated?'Técnico liberado':'Técnico bloqueado';$('techLockState').className=authStatus.authenticated?'success-chip':'lock-chip';$('authSummary').textContent=authStatus.authenticated?'Modo técnico autenticado. Ajustes avançados e override do inversor liberados.':'Área técnica protegida por senha. O painel abre em modo visual.';$('authHint').textContent=authStatus.authenticated?'Você pode acessar alarmes avançados, dados elétricos detalhados e a configuração do tipo de inversor.':'Use o acesso técnico apenas para manutenção, diagnóstico e configuração do tipo de inversor.';$('modeBadge').textContent=mode==='tech'&&authStatus.authenticated?'Modo técnico':'Modo visual'}
+if (tap) tap.classList.toggle('hidden', !authStatus.authenticated || mode !== 'tech');
+const tdc = $('techDeviceCard'); if (tdc) tdc.classList.toggle('hidden', !authStatus.authenticated || mode !== 'tech');
+$('btnTechLogout').classList.toggle('hidden',!authStatus.authenticated);$('techLockState').textContent=authStatus.authenticated?'Técnico liberado':'Técnico bloqueado';$('techLockState').className=authStatus.authenticated?'success-chip':'lock-chip';$('authSummary').textContent=authStatus.authenticated?'Modo técnico autenticado. Ajustes avançados e override do inversor liberados.':'Área técnica protegida por senha. O painel abre em modo visual.';$('authHint').textContent=authStatus.authenticated?'Você pode acessar alarmes avançados, dados elétricos detalhados e a configuração do tipo de inversor.':'Use o acesso técnico apenas para manutenção, diagnóstico e configuração do tipo de inversor.';$('modeBadge').textContent=mode==='tech'&&authStatus.authenticated?'Modo técnico':'Modo visual'}
 function applyDashboard(data){window.__lastData=data;const dashboard=data.dashboard||{},ind=dashboard.indicators||{},reports=dashboard.reports||{},simple=dashboard.simplified||{},profile=dashboard.profile||{},status=dashboard.status||{},tech=dashboard.technical||{},alerts=dashboard.alerts||[];detectionStatus=data.detection_status||dashboard.inverter_detection||detectionStatus;inverterType=detectionStatus.effective_inverter_type||data.inverter_type||dashboard.inverter_type||inverterType;applyInverterButtons();renderDetectionStatus();$('installName').textContent=data.config?.nome_instalacao||'Residência';$('headline').textContent=simple.headline||ind.status_text||'Sem dados';$('subline').textContent=status.status_text||ind.status_text||'Aguardando dados.';$('prStatus').textContent=simple.status_text||ind.status_text||'Sem interpretação';$('updatedAt').textContent=new Date((status.updated_at||data.updated_at||0)*1000).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});configureLayout(dashboard,ind,status);renderAlerts(alerts);renderTechAlerts(alerts);renderReports(reports);renderRecs(profile);renderHourChart(ind.hourly||{});renderWeekBars(data.history_filtered||dashboard.history?.daily||[]);renderTechnical(tech);vis_historyRows=data.history_filtered||dashboard.history?.daily||[];if(mode==='visual'){vis_renderStats(data.snapshot||{},vis_historyRows);vis_renderBattery(data.snapshot||{});vis_renderFlow(data.snapshot||{});vis_drawChart24h(ind.hourly||{});vis_renderDonuts(ind);vis_drawHistory(vis_historyRows);vis_updateStrings(data.snapshot||{});vis_calcSavings(data.snapshot||{},vis_historyRows);}
-if(mode==='tech'){tech_renderFlow(data.snapshot||{});tech_updateBatteryDetail(data.snapshot||{});tech_updateStrings(data.snapshot||{});}}
+if(mode==='tech'){tech_renderFlow(data.snapshot||{});tech_updateBatteryDetail(data.snapshot||{});tech_updateStrings(data.snapshot||{});if(authStatus.authenticated)tech_renderDeviceInfo(data.snapshot||{},tech);}}
 async function syncInverterType(nextType,{reload=true}={}){const r=await fetch('/api/inverter-type/override',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({inverter_type:nextType})});const payload=await r.json();if(!r.ok){$('authError').textContent=payload.message||'Faça login técnico para alterar o inversor.';openTechModal();return}detectionStatus=payload;inverterType=detectionStatus.effective_inverter_type||nextType;applyInverterButtons();renderDetectionStatus();if(reload)await loadDashboard()}
 async function clearOverride(){const r=await fetch('/api/inverter-type/clear-override',{method:'POST',credentials:'same-origin'});const payload=await r.json();if(!r.ok){$('authError').textContent=payload.message||'Faça login técnico para limpar o override.';openTechModal();return}detectionStatus=payload;inverterType=detectionStatus.effective_inverter_type||'hybrid';applyInverterButtons();renderDetectionStatus();await loadDashboard()}
 async function initializeInverterType(){const [detectResp,authResp]=await Promise.all([fetch('/api/detection-status',{credentials:'same-origin'}),fetch('/api/auth/technical-status',{credentials:'same-origin'})]);detectionStatus=await detectResp.json();authStatus=await authResp.json();inverterType=detectionStatus.effective_inverter_type||'hybrid';applyInverterButtons();renderDetectionStatus();applyAuthState()}
@@ -634,6 +645,11 @@ function setMode(next) {
     tech_updateStrings(d.snapshot || {});
     renderHourChart(((d.dashboard || {}).indicators || {}).hourly || {});
     renderWeekBars(d.history_filtered || []);
+    // load device info when entering tech tab as authenticated
+    if (authStatus.authenticated) {
+      tech_renderDeviceInfo(d.snapshot || {}, (d.dashboard || {}).technical || {});
+      tech_fetchInverterConfig();
+    }
   }
 }
 function openTechModal(){$('authError').textContent='';$('techPassword').value='';$('techModal').classList.add('visible');$('techPassword').focus()}
@@ -1253,6 +1269,72 @@ function tech_updateBatteryDetail(snapshot) {
   setTd('techBattW',    kw ? Math.round(kw * 1000) + ' W' : '-- W');
   setTd('techBattTemp', temp !== null ? temp.toFixed(1) + ' °C' : '-- °C');
   setTd('techBattKwh',  kwh ? kwh.toFixed(2) + ' kWh' : '-- kWh');
+}
+
+function tech_renderDeviceInfo(snapshot, tech) {
+  const el = $('techDeviceContent');
+  if (!el) return;
+  const snap = snapshot || {};
+  const inv = (tech || {}).inverter || {};
+  const energy = (tech || {}).energy || {};
+  const diag = (tech || {}).diagnostics || {};
+
+  const row = (label, val) => `<tr>
+    <td style="color:#9ca3af;padding:3px 6px;white-space:nowrap">${label}</td>
+    <td style="font-weight:600;padding:3px 6px">${val !== undefined && val !== null && val !== '' ? val : '--'}</td>
+  </tr>`;
+
+  const caps = (snap.inverter_capabilities || []).join(', ') || '--';
+  const firmware = snap.firmware_version && snap.firmware_version !== 'unknown' ? snap.firmware_version : inv.firmware_version || '--';
+  const serial = snap.serial_number || inv.serial_number || '--';
+  const model = snap.model || '--';
+  const brand = snap.manufacturer || snap.brand || '--';
+  const tempC = inv.temperature_c != null ? inv.temperature_c.toFixed(1) + ' °C' : (snap.temperature_c != null ? snap.temperature_c.toFixed(1) + ' °C' : '--');
+  const eff = inv.efficiency_percent != null ? inv.efficiency_percent.toFixed(1) + '%' : '--';
+  const peakKw = energy.peak_power_kw != null ? energy.peak_power_kw.toFixed(2) + ' kW' : '--';
+  const genDurH = energy.generation_duration_h != null ? energy.generation_duration_h.toFixed(1) + ' h' : '--';
+  const opMode = snap.operating_mode || snap.inverter_mode || '--';
+
+  el.innerHTML = `<table class="cs-table">
+    <thead><tr><th colspan="2">Identificação</th></tr></thead>
+    <tbody>
+      ${row('Fabricante', brand)}
+      ${row('Modelo', model)}
+      ${row('Número de série', serial)}
+      ${row('Firmware', firmware)}
+      ${row('Capacidades', caps)}
+      ${row('Modo operacional', opMode)}
+    </tbody>
+    <thead><tr><th colspan="2">Estado do inversor</th></tr></thead>
+    <tbody>
+      ${row('Temperatura', tempC)}
+      ${row('Eficiência', eff)}
+      ${row('Pico de potência hoje', peakKw)}
+      ${row('Horas em geração hoje', genDurH)}
+    </tbody>
+  </table>`;
+
+  // Also render full technical groups if we have tech data
+  if (tech && Object.keys(tech).length > 0) {
+    renderTechnical(tech);
+  }
+}
+
+async function tech_fetchInverterConfig() {
+  const el = $('techDeviceContent');
+  if (el) el.innerHTML = '<div style="font-size:11px;color:#9ca3af">Buscando dados...</div>';
+  try {
+    const r = await fetch('/api/technical', { credentials: 'same-origin' });
+    if (!r.ok) {
+      if (el) el.innerHTML = '<div style="font-size:11px;color:#ef4444">Acesso negado ou dados indisponíveis.</div>';
+      return;
+    }
+    const tech = await r.json();
+    const snap = window.__lastData?.snapshot || {};
+    tech_renderDeviceInfo(snap, tech);
+  } catch (e) {
+    if (el) el.innerHTML = '<div style="font-size:11px;color:#ef4444">Erro ao buscar configurações.</div>';
+  }
 }
 
 function tech_updateStrings(snapshot) {

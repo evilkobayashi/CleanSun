@@ -9,6 +9,15 @@ if sys.implementation.name == "micropython":
 else:
     import asyncio
 
+from logger import CleanSunLogger, LogLevel
+from connection_pool import TCPConnectionPool
+from circuit_breaker import CircuitBreakerManager, CircuitBreakerOpenError
+from metrics import PrometheusMetrics
+
+
+API_VERSION = "1.0.0"
+API_BASE = "/api/v1"
+
 
 class CleanSunHTTPServer:
     def __init__(self, processor, host="0.0.0.0", port=80):
@@ -17,9 +26,26 @@ class CleanSunHTTPServer:
         self.port = port
         self.server = None
         self._technical_sessions = {}
+        self._dashboard_html = "<html><body>Dashboard indisponível.</body></html>"
+        self._login_attempts = {}
+        self.logger = CleanSunLogger("cleansun.http", "INFO")
+        self.pool = TCPConnectionPool(max_connections=50)
+        self.circuit_breaker = CircuitBreakerManager()
+        self.metrics = PrometheusMetrics()
+        self._start_time = int(time.time())
+        self.circuit_breaker.get_or_create("api", failure_threshold=5, timeout_seconds=30)
 
     async def start(self):
-        self.server = await asyncio.start_server(self._handle_client, self.host, self.port)
+        try:
+            with open("dashboard.html", "r", encoding="utf-8") as f:
+                self._dashboard_html = f.read()
+        except OSError:
+            pass
+        self.server = await asyncio.start_server(
+            lambda r, w: self.pool.handle_client(r, w, self._handle_client),
+            self.host,
+            self.port,
+        )
 
     @staticmethod
     def _parse_query(path):
@@ -49,10 +75,21 @@ class CleanSunHTTPServer:
             cookies[key.strip()] = value.strip()
         return cookies
 
+    _MAX_BODY_BYTES = 65536
+
     @staticmethod
     async def _read_body(reader, headers):
-        content_length = int(headers.get("content-length", "0") or "0")
+        content_length = min(int(headers.get("content-length", "0") or "0"), 65536)
         return await reader.read(content_length) if content_length > 0 else b""
+
+    def _login_rate_limited(self, ip):
+        now = time.time()
+        attempts = [t for t in self._login_attempts.get(ip, []) if now - t < 60]
+        self._login_attempts[ip] = attempts
+        if len(attempts) >= 10:
+            return True
+        self._login_attempts[ip].append(now)
+        return False
 
     def _alerts_response(self, q, source="current"):
         severity = q.get("severity") or None
@@ -107,10 +144,11 @@ class CleanSunHTTPServer:
         return True, None
 
     async def _handle_client(self, reader, writer):
+        _req_start = time.time()
+        _success = True
         try:
             req = await reader.readline()
             if not req:
-                await writer.wait_closed()
                 return
             parts = req.decode("utf-8", "ignore").split(" ")
             method = parts[0] if parts else "GET"
@@ -127,37 +165,63 @@ class CleanSunHTTPServer:
                     headers[key.lower()] = value.strip()
             body = await self._read_body(reader, headers)
             authenticated = self._is_technical_authenticated(headers)
+            cb = self.circuit_breaker.get_or_create("api")
 
             get_routes = {
                 "/api/data": lambda q: self.processor.payload(),
+                "/api/v1/data": lambda q: {**self.processor.payload(), "api_version": API_VERSION},
                 "/api/dashboard": lambda q: self.processor.dashboard(int(q.get("days", "7")), q.get("bucket", "daily")),
+                "/api/v1/dashboard": lambda q: {**self.processor.dashboard(int(q.get("days", "7")), q.get("bucket", "daily")), "api_version": API_VERSION},
                 "/api/indicators": lambda q: self.processor.indicators(),
+                "/api/v1/indicators": lambda q: self.processor.indicators(),
                 "/api/alerts": lambda q: self._alerts_response(q, "current"),
+                "/api/v1/alerts": lambda q: self._alerts_response(q, "current"),
                 "/api/alerts/active": lambda q: self._alerts_response(q, "active"),
+                "/api/v1/alerts/active": lambda q: self._alerts_response(q, "active"),
                 "/api/alerts/history": lambda q: self._alerts_response(q, "history"),
+                "/api/v1/alerts/history": lambda q: self._alerts_response(q, "history"),
                 "/api/profile": lambda q: self.processor.profile(),
+                "/api/v1/profile": lambda q: self.processor.profile(),
                 "/api/compare": lambda q: self.processor.compare(),
+                "/api/v1/compare": lambda q: self.processor.compare(),
                 "/api/technical": lambda q: self.processor.technical() if authenticated else {"error": "technical_auth_required"},
+                "/api/v1/technical": lambda q: self.processor.technical() if authenticated else {"error": "technical_auth_required"},
                 "/api/diagnostics": lambda q: self.processor.diagnostics() if authenticated else {"error": "technical_auth_required"},
+                "/api/v1/diagnostics": lambda q: self.processor.diagnostics() if authenticated else {"error": "technical_auth_required"},
                 "/api/status": lambda q: self.processor.status(),
+                "/api/v1/status": lambda q: self.processor.status(),
                 "/api/inverter-type": lambda q: {"inverter_type": self.processor.effective_inverter_type()},
+                "/api/v1/inverter-type": lambda q: {"inverter_type": self.processor.effective_inverter_type()},
                 "/api/inverter-metadata": lambda q: self.processor.inverter_metadata() if authenticated else {"error": "technical_auth_required"},
+                "/api/v1/inverter-metadata": lambda q: self.processor.inverter_metadata() if authenticated else {"error": "technical_auth_required"},
                 "/api/detection-status": lambda q: self.processor.detection_status(),
+                "/api/v1/detection-status": lambda q: self.processor.detection_status(),
                 "/api/summary/daily": lambda q: self.processor.summary("daily"),
+                "/api/v1/summary/daily": lambda q: self.processor.summary("daily"),
                 "/api/summary/weekly": lambda q: self.processor.summary("weekly"),
+                "/api/v1/summary/weekly": lambda q: self.processor.summary("weekly"),
                 "/api/history": lambda q: {"days": int(q.get("days", "7")), "bucket": q.get("bucket", "hourly"), "rows": self.processor.history_period(int(q.get("days", "7")), q.get("bucket", "hourly"))},
+                "/api/v1/history": lambda q: {"days": int(q.get("days", "7")), "bucket": q.get("bucket", "hourly"), "rows": self.processor.history_period(int(q.get("days", "7")), q.get("bucket", "hourly"))},
                 "/api/state": lambda q: self.processor.payload(),
+                "/api/v1/state": lambda q: self.processor.payload(),
                 "/api/auth/technical-status": lambda q: self._technical_status_payload(authenticated),
+                "/api/v1/auth/technical-status": lambda q: self._technical_status_payload(authenticated),
+                "/api/metrics": lambda q: self._serve_metrics(),
+                "/api/v1/metrics": lambda q: self._serve_metrics(),
+                "/api/health": lambda q: self._health_check(),
+                "/api/v1/health": lambda q: self._health_check(),
+                "/api/config/solarman": lambda q: self.processor.get_solarman_config() if authenticated else {"error": "technical_auth_required"},
+                "/api/v1/config/solarman": lambda q: self.processor.get_solarman_config() if authenticated else {"error": "technical_auth_required"},
             }
 
             if method == "GET":
                 if path == "/":
                     await self._serve_dashboard(writer)
                 elif path == "/api/events":
-                    await self._serve_sse(writer)
+                    await self._serve_sse(writer, int(query.get("days", "7")), query.get("bucket", "daily"))
                 elif path in get_routes:
                     status = "200 OK"
-                    payload = get_routes[path](query)
+                    payload = cb.execute(get_routes[path], query)
                     if isinstance(payload, dict) and payload.get("error") == "technical_auth_required":
                         status = "401 Unauthorized"
                     await self._send(writer, status, "application/json", json.dumps(payload, ensure_ascii=False))
@@ -168,6 +232,10 @@ class CleanSunHTTPServer:
             if method == "POST" and path == "/api/auth/technical-login":
                 if not self._technical_mode_enabled():
                     await self._send(writer, "403 Forbidden", "application/json", json.dumps({"error": "technical_mode_disabled", "message": "Modo técnico desabilitado."}, ensure_ascii=False))
+                    return
+                ip = writer.get_extra_info("peername", ("unknown", 0))[0]
+                if self._login_rate_limited(ip):
+                    await self._send(writer, "429 Too Many Requests", "application/json", json.dumps({"error": "rate_limited", "message": "Muitas tentativas. Tente novamente em 60 segundos."}, ensure_ascii=False))
                     return
                 payload = json.loads(body.decode("utf-8") or "{}") if body else {}
                 password = str(payload.get("password") or "")
@@ -207,7 +275,7 @@ class CleanSunHTTPServer:
                     await self._send(writer, status, "application/json", json.dumps(payload, ensure_ascii=False), extra_headers=extra_headers)
                     return
                 payload = json.loads(body.decode("utf-8") or "{}") if body else {}
-                status = self.processor.set_manual_override(payload.get("inverter_type"))
+                status = cb.execute(self.processor.set_manual_override, payload.get("inverter_type"))
                 await self._send(writer, "200 OK", "application/json", json.dumps(status, ensure_ascii=False))
                 return
 
@@ -217,21 +285,68 @@ class CleanSunHTTPServer:
                     status, payload, extra_headers = error
                     await self._send(writer, status, "application/json", json.dumps(payload, ensure_ascii=False), extra_headers=extra_headers)
                     return
-                status = self.processor.clear_manual_override()
+                status = cb.execute(self.processor.clear_manual_override)
                 await self._send(writer, "200 OK", "application/json", json.dumps(status, ensure_ascii=False))
                 return
 
+            if method == "POST" and path in ("/api/config/solarman", "/api/v1/config/solarman"):
+                allowed, error = self._require_technical_auth(headers)
+                if not allowed:
+                    status, payload, extra_headers = error
+                    await self._send(writer, status, "application/json", json.dumps(payload, ensure_ascii=False), extra_headers=extra_headers)
+                    return
+                try:
+                    payload = json.loads(body.decode("utf-8") or "{}") if body else {}
+                    result = self.processor.update_solarman_config(payload.get("datalogger_ip", ""), payload.get("datalogger_serial", 0))
+                    await self._send(writer, "200 OK", "application/json", json.dumps({"ok": True, **result}, ensure_ascii=False))
+                except (ValueError, TypeError) as exc:
+                    await self._send(writer, "400 Bad Request", "application/json", json.dumps({"error": "invalid_input", "message": str(exc)}, ensure_ascii=False))
+                return
+
             await self._send(writer, "405 Method Not Allowed", "application/json", json.dumps({"error": "method_not_allowed"}))
+        except CircuitBreakerOpenError as exc:
+            _success = False
+            self.logger.warning(f"Circuit breaker aberto: {exc}")
+            await self._send(writer, "503 Service Unavailable", "application/json", json.dumps({"error": "circuit_breaker_open", "message": "Serviço temporariamente indisponível."}, ensure_ascii=False))
         except Exception as exc:
+            _success = False
             self.processor.register_fault("server_api_failure", str(exc))
-            await self._send(writer, "500 Internal Server Error", "application/json", json.dumps({"error": "server_api_failure", "detail": str(exc)}))
+            self.logger.error(f"Erro no servidor: {exc}")
+            await self._send(writer, "500 Internal Server Error", "application/json", json.dumps({"error": "server_api_failure"}))
+        finally:
+            self.metrics.record_request(int((time.time() - _req_start) * 1000), success=_success)
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                pass
 
     async def _serve_dashboard(self, writer):
-        with open("dashboard.html", "r", encoding="utf-8") as f:
-            body = f.read()
-        await self._send(writer, "200 OK", "text/html", body)
+        await self._send(writer, "200 OK", "text/html", self._dashboard_html)
 
-    async def _serve_sse(self, writer):
+    def _serve_metrics(self):
+        return {
+            "api_version": API_VERSION,
+            "metrics": self.metrics.stats(),
+            "connection_pool": self.pool.stats(),
+            "circuit_breakers": self.circuit_breaker.stats(),
+            "prometheus": self.metrics.export(),
+        }
+
+    def _health_check(self):
+        circuit_ok = all(
+            b.get("state") in ("closed", "half_open")
+            for b in self.circuit_breaker.stats().values()
+        )
+        return {
+            "status": "healthy" if circuit_ok else "degraded",
+            "api_version": API_VERSION,
+            "uptime_seconds": int(time.time()) - self._start_time,
+            "circuit_breakers": self.circuit_breaker.stats(),
+            "connection_pool": self.pool.stats(),
+        }
+
+    async def _serve_sse(self, writer, days=7, bucket="daily"):
         headers = (
             "HTTP/1.1 200 OK\r\n"
             "Content-Type: text/event-stream\r\n"
@@ -242,14 +357,18 @@ class CleanSunHTTPServer:
         await writer.drain()
         try:
             while True:
-                payload = json.dumps(self.processor.dashboard(), ensure_ascii=False)
+                payload = json.dumps(self.processor.dashboard(days, bucket), ensure_ascii=False)
                 writer.write(("event: update\ndata: " + payload + "\n\n").encode("utf-8"))
                 await writer.drain()
                 await asyncio.sleep(5)
         except Exception:
             pass
         finally:
-            await writer.wait_closed()
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                pass
 
     async def _send(self, writer, status, content_type, body, extra_headers=None):
         if isinstance(body, str):
@@ -266,4 +385,5 @@ class CleanSunHTTPServer:
         writer.write(response)
         writer.write(body)
         await writer.drain()
+        writer.close()
         await writer.wait_closed()

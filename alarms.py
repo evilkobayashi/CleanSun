@@ -160,7 +160,7 @@ class AlarmEngine:
                        recommended_action="Consultar código de falha, registrar o evento e inspecionar proteções e estado da rede.",
                        timestamp=ts, source="inverter", affected_component="inversor")
 
-        if self._persist("GRID_UNDERVOLTAGE", 0 < grid_v < 195, 2):
+        if self._persist("GRID_UNDERVOLTAGE", 0 < grid_v < 115, 2):
             self._push(alarms, code="GRID_UNDERVOLTAGE", category="rede", severity="warning", title="Subtensão da rede elétrica",
                        technical_description="A tensão da rede está abaixo da faixa operacional ideal para o inversor.",
                        simplified_message="A rede elétrica está com tensão abaixo do normal.",
@@ -168,7 +168,7 @@ class AlarmEngine:
                        recommended_action="Medir tensão em campo e, se persistir, acionar a concessionária.",
                        timestamp=ts, source="grid", affected_component="rede elétrica")
 
-        if self._persist("GRID_OVERVOLTAGE", grid_v > 245, 2):
+        if self._persist("GRID_OVERVOLTAGE", grid_v > 140, 2):
             self._push(alarms, code="GRID_OVERVOLTAGE", category="rede", severity="critical", title="Sobretensão da rede elétrica",
                        technical_description="A tensão da rede está acima da faixa aceitável e pode provocar limitação ou desligamento do inversor.",
                        simplified_message="A rede elétrica está com tensão acima do normal.",

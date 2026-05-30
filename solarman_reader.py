@@ -29,8 +29,8 @@ _REG_TEMP        = 90    # (value − 1000) × 0.1 °C
 _REG_TODAY_KWH   = 108   # ×0.1 kWh, daily generation (resets at midnight)
 _REG_TOTAL_KWH   = 96    # ×0.1 kWh, cumulative generation (reg96 low + reg97 high)
 _REG_GRID_V      = 150   # ×0.1 V, L1 phase voltage
-_REG_LOAD_L1_W   = 160   # ×1 W signed, total load L1 (house consumption)
-_REG_LOAD_L2_W   = 161   # ×1 W signed, total load L2 (house consumption)
+_REG_GRID_L1_W   = 160   # ×1 W signed, grid power L1 (positive=import). External CT reads 0.
+_REG_GRID_L2_W   = 161   # ×1 W signed, grid power L2 (positive=import)
 _REG_BATT_V      = 183   # ×0.01 V
 _REG_BATT_SOC    = 184   # ×1 %
 _REG_PV1_W       = 186   # ×1 W
@@ -49,7 +49,7 @@ def _map_raw_to_snapshot(raw: dict, battery_kwh: float = 9.6) -> dict:
         "pv1_v_raw", "pv1_a_raw", "pv2_v_raw", "pv2_a_raw",
         "pv1_w_raw", "pv2_w_raw", "temp_raw",
         "batt_v_raw", "batt_soc_raw", "batt_w_raw",
-        "load_l1_w_raw", "load_l2_w_raw", "grid_v_raw", "grid_hz_raw",
+        "grid_l1_w_raw", "grid_l2_w_raw", "grid_v_raw", "grid_hz_raw",
         "today_kwh_raw", "total_kwh_raw",
     )
     missing = [k for k in _REQUIRED if k not in raw]
@@ -65,9 +65,9 @@ def _map_raw_to_snapshot(raw: dict, battery_kwh: float = 9.6) -> dict:
     batt_v = raw["batt_v_raw"] * 0.01
     batt_soc = raw["batt_soc_raw"]
     batt_w = _signed16(raw["batt_w_raw"])  # positive = discharging (Deye convention)
-    # reg160+reg161 (L1+L2) = total house consumption — confirmed by AC load test
-    # (matched Solarman "consumo" 990W at AC peak). This is the LOAD, not grid.
-    load_w = max(0, _signed16(raw["load_l1_w_raw"]) + _signed16(raw["load_l2_w_raw"]))
+    # reg160+reg161 (L1+L2) = total grid power. Confirmed against the Solarman app:
+    # grid 670 W + battery 111 W discharge = load 790 W (energy balance closes).
+    grid_w = _signed16(raw["grid_l1_w_raw"]) + _signed16(raw["grid_l2_w_raw"])
     grid_v = raw["grid_v_raw"] * 0.1
     grid_hz = raw["grid_hz_raw"] * 0.01
     today_kwh = raw["today_kwh_raw"] * 0.1
@@ -84,13 +84,11 @@ def _map_raw_to_snapshot(raw: dict, battery_kwh: float = 9.6) -> dict:
     else:
         batt_mode = "idle"
 
-    # Grid exchange from energy balance: what load needs minus PV minus battery.
-    # positive = importing from grid, negative = exporting.
-    batt_discharge_w = max(0, batt_w)
-    batt_charge_w = max(0, -batt_w)
-    grid_w = load_w - (pv1_w + pv2_w) - batt_discharge_w + batt_charge_w
     import_w = max(0, grid_w)
     export_w = max(0, -grid_w)
+    # House consumption from energy balance: PV + grid_import + batt_discharge
+    # (grid_w positive=import, batt_w positive=discharge). Matches app's "consumo".
+    load_w = max(0, (pv1_w + pv2_w) + grid_w + batt_w)
 
     if grid_v < 1.0:
         grid_status = "Indisponível"
@@ -326,8 +324,8 @@ class SolarmanLANTransport:
         # b150 covers regs 150..190 (index = reg - 150)
         return {
             "grid_v_raw":    b150[0],    # reg150
-            "load_l1_w_raw": b150[10],   # reg160 = total load L1
-            "load_l2_w_raw": b150[11],   # reg161 = total load L2
+            "grid_l1_w_raw": b150[10],   # reg160 = grid power L1
+            "grid_l2_w_raw": b150[11],   # reg161 = grid power L2
             "batt_v_raw":    b150[33],   # reg183
             "batt_soc_raw":  b150[34],   # reg184
             "pv1_w_raw":     b150[36],   # reg186
@@ -431,7 +429,7 @@ class SolarmanCloudTransport:
             except (ValueError, TypeError):
                 return float(default)
 
-        load_kw = _f("LoadPower")
+        grid_kw = _f("GridOrMeterActivePower")
         batt_kw = _f("BatPower")
 
         return {
@@ -445,8 +443,8 @@ class SolarmanCloudTransport:
             "batt_v_raw":    int(_f("BatVolt") * 100),
             "batt_soc_raw":  int(_f("BatCapcity")),
             "batt_w_raw":    int(batt_kw * 1000),
-            "load_l1_w_raw": int(load_kw * 1000),  # cloud reports single total; put on L1
-            "load_l2_w_raw": 0,
+            "grid_l1_w_raw": int(grid_kw * 1000),  # cloud reports single total; put on L1
+            "grid_l2_w_raw": 0,
             "grid_v_raw":    int(_f("GridVolt") * 10),
             "grid_hz_raw":   int(_f("GridFreq") * 100),
             "today_kwh_raw": int(_f("Eday") * 10),

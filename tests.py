@@ -362,21 +362,21 @@ class TestHTTPServer(unittest.TestCase):
 class TestDeyeDataMapping(unittest.TestCase):
     def _make_raw(self):
         # Scales verified against real Deye SUN-7.5K hardware (reg90 temp has a
-        # -1000 offset; reg183 battery voltage is ×0.01). Load = reg160 + reg161;
-        # grid is derived from the energy balance.
+        # -1000 offset; reg183 battery voltage is ×0.01). Grid = reg160 + reg161;
+        # load is derived from the energy balance (pv + grid + battery).
         return {
             "pv1_v_raw": 3520,    # 352.0 V
             "pv1_a_raw": 95,      # 9.5 A
             "pv2_v_raw": 3480,    # 348.0 V
             "pv2_a_raw": 90,      # 9.0 A
             "pv1_w_raw": 3344,    # 3344 W
-            "pv2_w_raw": 3132,    # 3132 W
+            "pv2_w_raw": 3132,    # 3132 W -> PV total 6476 W
             "temp_raw": 1435,     # (1435-1000)*0.1 = 43.5 °C
             "batt_v_raw": 5120,   # 5120*0.01 = 51.2 V
             "batt_soc_raw": 75,   # 75 %
             "batt_w_raw": 1200,   # +1200 W = discharging (Deye convention)
-            "load_l1_w_raw": 1238,  # reg160
-            "load_l2_w_raw": 1238,  # reg161 -> total load 2476 W
+            "grid_l1_w_raw": 62936,  # reg160 signed -2600
+            "grid_l2_w_raw": 62936,  # reg161 signed -2600 -> grid_w -5200 (exporting)
             "grid_v_raw": 2200,   # 220.0 V
             "grid_hz_raw": 6000,  # 60.00 Hz
             "today_kwh_raw": 312, # 31.2 kWh
@@ -393,10 +393,11 @@ class TestDeyeDataMapping(unittest.TestCase):
         snap = _map_raw_to_snapshot(self._make_raw())
         self.assertAlmostEqual(snap["tensao_dc_v"], (352.0 + 348.0) / 2, places=1)
 
-    def test_mapping_load(self):
+    def test_mapping_load_derived(self):
         from solarman_reader import _map_raw_to_snapshot
+        # load = pv + grid_w + batt_w = 6476 + (-5200) + 1200 = 2476
         snap = _map_raw_to_snapshot(self._make_raw())
-        self.assertEqual(snap["load_power_w"], 1238 + 1238)
+        self.assertEqual(snap["load_power_w"], 2476)
 
     def test_mapping_battery(self):
         from solarman_reader import _map_raw_to_snapshot
@@ -406,9 +407,9 @@ class TestDeyeDataMapping(unittest.TestCase):
         self.assertAlmostEqual(snap["battery_power_kw"], 1.2, places=2)
         self.assertEqual(snap["battery_mode"], "discharging")
 
-    def test_mapping_grid_derived_export(self):
+    def test_mapping_grid_export(self):
         from solarman_reader import _map_raw_to_snapshot
-        # grid = load - pv - batt_discharge = 2476 - 6476 - 1200 = -5200 -> export
+        # grid_w = reg160 + reg161 = -2600 + -2600 = -5200 -> exporting
         snap = _map_raw_to_snapshot(self._make_raw())
         self.assertEqual(snap["import_power_w"], 0)
         self.assertEqual(snap["export_power_w"], 5200)
@@ -458,8 +459,8 @@ class TestSolarmanLANTransport(unittest.TestCase):
         raw = transport.read_registers()
         self.assertEqual(raw["pv1_v_raw"], 3520)
         self.assertEqual(raw["batt_soc_raw"], 75)
-        self.assertEqual(raw["load_l1_w_raw"], 1238)
-        self.assertEqual(raw["load_l2_w_raw"], 1238)
+        self.assertEqual(raw["grid_l1_w_raw"], 1238)
+        self.assertEqual(raw["grid_l2_w_raw"], 1238)
         self.assertEqual(raw["today_kwh_raw"], 312)
         self.assertEqual(raw["total_kwh_raw"], 4521)
 
@@ -554,7 +555,7 @@ class TestSolarmanCloudTransport(unittest.TestCase):
 
         self.assertEqual(raw["pv1_w_raw"], 3344)
         self.assertEqual(raw["batt_soc_raw"], 75)
-        self.assertEqual(raw["load_l1_w_raw"], 2476)  # LoadPower 2.476 kW
+        self.assertEqual(raw["grid_l1_w_raw"], -1000)  # GridOrMeterActivePower -1.0 kW
 
 
 class TestDeyeSolarmanReader(unittest.TestCase):
@@ -573,7 +574,7 @@ class TestDeyeSolarmanReader(unittest.TestCase):
             "pv1_v_raw": 3520, "pv1_a_raw": 95, "pv2_v_raw": 3480, "pv2_a_raw": 90,
             "pv1_w_raw": 3344, "pv2_w_raw": 3132, "temp_raw": 1435,
             "batt_v_raw": 5120, "batt_soc_raw": 75, "batt_w_raw": 1200,
-            "load_l1_w_raw": 1238, "load_l2_w_raw": 1238, "grid_v_raw": 2200,
+            "grid_l1_w_raw": 1238, "grid_l2_w_raw": 1238, "grid_v_raw": 2200,
             "grid_hz_raw": 6000, "today_kwh_raw": 312, "total_kwh_raw": 4521,
         }
 

@@ -43,6 +43,7 @@ class DataProcessor:
         self.last_update_ts = 0
         self.fault = None
         self._hour_state = None
+        self.inverter_config = {}
         self._ensure_history_file()
 
     def _load_config(self):
@@ -86,6 +87,13 @@ class DataProcessor:
 
     def register_fault(self, title, detail=""):
         self.fault = {"title": title, "detail": detail, "ts": int(time.time())}
+
+    def set_inverter_config(self, cfg):
+        if cfg:
+            self.inverter_config = dict(cfg)
+
+    def get_inverter_config(self):
+        return dict(self.inverter_config)
 
     def ingest_snapshot(self, snapshot, now_ts=None):
         ts = int(now_ts if now_ts is not None else snapshot.get("timestamp", time.time()))
@@ -494,10 +502,21 @@ class DataProcessor:
 
     def _update_detection(self, snapshot):
         status = detect_inverter_type(snapshot, self.config)
-        self.config["detected_inverter_type"] = status.get("detected_inverter_type")
-        self.config["detection_source"] = status.get("detection_source")
-        self.config["detection_confidence"] = status.get("confidence")
-        self._update_config()
+        new_type = status.get("detected_inverter_type")
+        new_source = status.get("detection_source")
+        new_conf = status.get("confidence")
+        # Only persist config when detection actually changed — avoids a
+        # config.json write on every poll (would be 1 write/s at fast polling).
+        changed = (
+            self.config.get("detected_inverter_type") != new_type
+            or self.config.get("detection_source") != new_source
+            or self.config.get("detection_confidence") != new_conf
+        )
+        self.config["detected_inverter_type"] = new_type
+        self.config["detection_source"] = new_source
+        self.config["detection_confidence"] = new_conf
+        if changed:
+            self._update_config()
         return status
 
     def detection_status(self):

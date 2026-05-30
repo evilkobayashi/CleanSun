@@ -1353,6 +1353,25 @@ function tech_updateBatteryDetail(snapshot) {
   setTd('techBattKwh',  kwh ? kwh.toFixed(2) + ' kWh' : '-- kWh');
 }
 
+function tech_renderConfigTable(conf) {
+  if (!conf || !conf.serial_number) return '';
+  const row = (label, val) => `<tr>
+    <td style="color:#9ca3af;padding:3px 6px;white-space:nowrap">${label}</td>
+    <td style="font-weight:600;padding:3px 6px">${val !== undefined && val !== null ? val : '--'}</td>
+  </tr>`;
+  // All fields below were confirmed against the Solarman Smart app.
+  return `<table class="cs-table" style="margin-top:8px">
+    <thead><tr><th colspan="2">Configuração da bateria (BMS)</th></tr></thead>
+    <tbody>
+      ${row('Capacidade nominal', conf.battery_capacity_ah != null ? conf.battery_capacity_ah + ' Ah' : '--')}
+      ${row('Tensão de carga (BMS)', conf.bms_charge_voltage_v != null ? conf.bms_charge_voltage_v.toFixed(1) + ' V' : '--')}
+      ${row('Limite corrente de carga', conf.bms_charge_current_limit_a != null ? conf.bms_charge_current_limit_a + ' A' : '--')}
+      ${row('Limite corrente de descarga', conf.bms_discharge_current_limit_a != null ? conf.bms_discharge_current_limit_a + ' A' : '--')}
+      ${row('SOC (BMS)', conf.bms_soc_pct != null ? conf.bms_soc_pct + ' %' : '--')}
+      ${row('Tensão da bateria', conf.battery_voltage_v != null ? conf.battery_voltage_v.toFixed(2) + ' V' : '--')}
+    </tbody>
+  </table>`;
+}
 function tech_renderDeviceInfo(snapshot, tech) {
   const el = $('techDeviceContent');
   if (!el) return;
@@ -1366,11 +1385,12 @@ function tech_renderDeviceInfo(snapshot, tech) {
     <td style="font-weight:600;padding:3px 6px">${val !== undefined && val !== null && val !== '' ? val : '--'}</td>
   </tr>`;
 
+  const conf = window.__invConfig || {};
   const caps = (snap.inverter_capabilities || []).join(', ') || '--';
   const firmware = snap.firmware_version && snap.firmware_version !== 'unknown' ? snap.firmware_version : inv.firmware_version || '--';
-  const serial = snap.serial_number || inv.serial_number || '--';
-  const model = snap.model || '--';
-  const brand = snap.manufacturer || snap.brand || '--';
+  const serial = conf.serial_number || snap.serial_number || inv.serial_number || '--';
+  const model = conf.model || snap.model || '--';
+  const brand = conf.manufacturer || snap.manufacturer || snap.brand || '--';
   const tempC = inv.temperature_c != null ? inv.temperature_c.toFixed(1) + ' °C' : (snap.temperature_c != null ? snap.temperature_c.toFixed(1) + ' °C' : '--');
   const eff = inv.efficiency_percent != null ? inv.efficiency_percent.toFixed(1) + '%' : '--';
   const peakKw = energy.peak_power_kw != null ? energy.peak_power_kw.toFixed(2) + ' kW' : '--';
@@ -1394,7 +1414,7 @@ function tech_renderDeviceInfo(snapshot, tech) {
       ${row('Pico de potência hoje', peakKw)}
       ${row('Horas em geração hoje', genDurH)}
     </tbody>
-  </table>`;
+  </table>` + tech_renderConfigTable(conf);
 
   // Also render full technical groups if we have tech data
   if (tech && Object.keys(tech).length > 0) {
@@ -1406,12 +1426,16 @@ async function tech_fetchInverterConfig() {
   const el = $('techDeviceContent');
   if (el) el.innerHTML = '<div style="font-size:11px;color:#9ca3af">Buscando dados...</div>';
   try {
-    const r = await fetch('/api/technical', { credentials: 'same-origin' });
-    if (!r.ok) {
+    const [rt, rc] = await Promise.all([
+      fetch('/api/technical', { credentials: 'same-origin' }),
+      fetch('/api/inverter-config', { credentials: 'same-origin' }),
+    ]);
+    if (!rt.ok) {
       if (el) el.innerHTML = '<div style="font-size:11px;color:#ef4444">Acesso negado ou dados indisponíveis.</div>';
       return;
     }
-    const tech = await r.json();
+    const tech = await rt.json();
+    window.__invConfig = rc.ok ? await rc.json() : {};
     const snap = window.__lastData?.snapshot || {};
     tech_renderDeviceInfo(snap, tech);
   } catch (e) {

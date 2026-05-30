@@ -186,6 +186,8 @@ class CleanSunHTTPServer:
                 "/api/v1/compare": lambda q: self.processor.compare(),
                 "/api/technical": lambda q: self.processor.technical() if authenticated else {"error": "technical_auth_required"},
                 "/api/v1/technical": lambda q: self.processor.technical() if authenticated else {"error": "technical_auth_required"},
+                "/api/inverter-config": lambda q: self.processor.get_inverter_config() if authenticated else {"error": "technical_auth_required"},
+                "/api/v1/inverter-config": lambda q: self.processor.get_inverter_config() if authenticated else {"error": "technical_auth_required"},
                 "/api/diagnostics": lambda q: self.processor.diagnostics() if authenticated else {"error": "technical_auth_required"},
                 "/api/v1/diagnostics": lambda q: self.processor.diagnostics() if authenticated else {"error": "technical_auth_required"},
                 "/api/status": lambda q: self.processor.status(),
@@ -355,12 +357,13 @@ class CleanSunHTTPServer:
         )
         writer.write(headers.encode("utf-8"))
         await writer.drain()
+        push_interval = float(self.processor.config.get("sse_push_seconds", 2))
         try:
             while True:
                 payload = json.dumps(self.processor.dashboard(days, bucket), ensure_ascii=False)
                 writer.write(("event: update\ndata: " + payload + "\n\n").encode("utf-8"))
                 await writer.drain()
-                await asyncio.sleep(5)
+                await asyncio.sleep(push_interval)
         except Exception:
             pass
         finally:

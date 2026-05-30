@@ -12,13 +12,34 @@ from data_processor import DataProcessor
 from http_server import CleanSunHTTPServer
 from solarman_reader import DeyeSolarmanReader
 
-POLL_SECONDS = 5
+POLL_SECONDS = 1.0  # local LAN polls ~0.3s; updates far faster than Solarman cloud (~300s)
+
+
+CONFIG_REFRESH_EVERY = 300  # re-read static inverter settings every N polls
 
 
 async def poll_loop(reader, processor, poll_seconds=POLL_SECONDS):
+    # On CPython, run the blocking Modbus read in a thread so the asyncio event
+    # loop stays free to serve HTTP/SSE while we wait on the datalogger socket.
+    use_executor = sys.implementation.name != "micropython"
+    loop = asyncio.get_event_loop() if use_executor else None
+
+    async def _call(fn):
+        if use_executor:
+            return await loop.run_in_executor(None, fn)
+        return fn()
+
+    n = 0
     while True:
         try:
-            processor.ingest_snapshot(reader.read_all())
+            snapshot = await _call(reader.read_all)
+            processor.ingest_snapshot(snapshot)
+            n += 1
+            if n % CONFIG_REFRESH_EVERY == 0:
+                try:
+                    processor.set_inverter_config(await _call(reader.read_inverter_config))
+                except Exception:
+                    pass
         except Exception as exc:
             processor.register_fault("Falha na leitura do inversor", str(exc))
         await asyncio.sleep(poll_seconds)
@@ -36,7 +57,12 @@ async def bootstrap(config_path="config.json", history_path="history.csv",
     reader = DeyeSolarmanReader(solarman_cfg)
     server = CleanSunHTTPServer(processor, host=host, port=port)
     await server.start()
-    await poll_loop(reader, processor)
+    try:
+        processor.set_inverter_config(reader.read_inverter_config())
+    except Exception:
+        pass  # config card will stay empty until first periodic refresh succeeds
+    poll_seconds = float(solarman_cfg.get("poll_seconds", POLL_SECONDS))
+    await poll_loop(reader, processor, poll_seconds=poll_seconds)
 
 
 def run_app(config_path="config.json", history_path="history.csv",

@@ -361,6 +361,9 @@ class TestHTTPServer(unittest.TestCase):
 
 class TestDeyeDataMapping(unittest.TestCase):
     def _make_raw(self):
+        # Scales verified against real Deye SUN-7.5K hardware (reg90 temp has a
+        # -1000 offset; reg183 battery voltage is ×0.01). Load = reg160 + reg161;
+        # grid is derived from the energy balance.
         return {
             "pv1_v_raw": 3520,    # 352.0 V
             "pv1_a_raw": 95,      # 9.5 A
@@ -368,14 +371,14 @@ class TestDeyeDataMapping(unittest.TestCase):
             "pv2_a_raw": 90,      # 9.0 A
             "pv1_w_raw": 3344,    # 3344 W
             "pv2_w_raw": 3132,    # 3132 W
-            "temp_raw": 435,      # 43.5 °C
-            "batt_v_raw": 512,    # 51.2 V
+            "temp_raw": 1435,     # (1435-1000)*0.1 = 43.5 °C
+            "batt_v_raw": 5120,   # 5120*0.01 = 51.2 V
             "batt_soc_raw": 75,   # 75 %
-            "batt_w_raw": 1200,   # 1200 W (charging)
-            "grid_w_raw": 64536,  # signed: 64536 - 65536 = -1000 W (exporting)
+            "batt_w_raw": 1200,   # +1200 W = discharging (Deye convention)
+            "load_l1_w_raw": 1238,  # reg160
+            "load_l2_w_raw": 1238,  # reg161 -> total load 2476 W
             "grid_v_raw": 2200,   # 220.0 V
             "grid_hz_raw": 6000,  # 60.00 Hz
-            "load_w_raw": 2476,   # 2476 W
             "today_kwh_raw": 312, # 31.2 kWh
             "total_kwh_raw": 4521,# 452.1 kWh
         }
@@ -390,19 +393,25 @@ class TestDeyeDataMapping(unittest.TestCase):
         snap = _map_raw_to_snapshot(self._make_raw())
         self.assertAlmostEqual(snap["tensao_dc_v"], (352.0 + 348.0) / 2, places=1)
 
+    def test_mapping_load(self):
+        from solarman_reader import _map_raw_to_snapshot
+        snap = _map_raw_to_snapshot(self._make_raw())
+        self.assertEqual(snap["load_power_w"], 1238 + 1238)
+
     def test_mapping_battery(self):
         from solarman_reader import _map_raw_to_snapshot
         snap = _map_raw_to_snapshot(self._make_raw())
         self.assertEqual(snap["battery_soc_percent"], 75)
         self.assertAlmostEqual(snap["battery_voltage_v"], 51.2, places=1)
         self.assertAlmostEqual(snap["battery_power_kw"], 1.2, places=2)
-        self.assertEqual(snap["battery_mode"], "charging")
+        self.assertEqual(snap["battery_mode"], "discharging")
 
-    def test_mapping_grid_export(self):
+    def test_mapping_grid_derived_export(self):
         from solarman_reader import _map_raw_to_snapshot
+        # grid = load - pv - batt_discharge = 2476 - 6476 - 1200 = -5200 -> export
         snap = _map_raw_to_snapshot(self._make_raw())
         self.assertEqual(snap["import_power_w"], 0)
-        self.assertEqual(snap["export_power_w"], 1000)
+        self.assertEqual(snap["export_power_w"], 5200)
 
     def test_mapping_energy(self):
         from solarman_reader import _map_raw_to_snapshot
@@ -423,21 +432,35 @@ class TestSolarmanLANTransport(unittest.TestCase):
     @patch("solarman_reader.PySolarmanV5")
     def test_read_registers_calls_pysolarman(self, MockPV5):
         from solarman_reader import SolarmanLANTransport
+        # Fast block = regs 150..190 (41 vals); slow block = regs 60..111 (52 vals).
+        fast = [0] * 41
+        fast[0] = 2200    # reg150 grid_v
+        fast[10] = 1238   # reg160 load L1
+        fast[11] = 1238   # reg161 load L2
+        fast[33] = 5120   # reg183 batt_v
+        fast[34] = 75     # reg184 batt_soc
+        fast[36] = 3344   # reg186 pv1_w
+        fast[37] = 3132   # reg187 pv2_w
+        fast[40] = 1200   # reg190 batt_w
+        slow = [0] * 52
+        slow[0] = 3520    # reg60 pv1_v
+        slow[1] = 95      # reg61 pv1_a
+        slow[2] = 3480    # reg62 pv2_v
+        slow[3] = 90      # reg63 pv2_a
+        slow[19] = 6000   # reg79 grid_hz
+        slow[30] = 1435   # reg90 temp
+        slow[49] = 312    # reg109 today
+        slow[50] = 0      # reg110 total high
+        slow[51] = 4521   # reg111 total low
         inst = MockPV5.return_value
-        inst.read_input_registers.side_effect = [
-            [3520, 95, 3480, 90],
-            [435],
-            [312, 0, 4521],
-            [512, 75, 0, 3344, 3132, 0, 0, 1200],
-            [64536, 0, 0, 0, 2200, 6000],
-            [2476],
-        ]
+        inst.read_holding_registers.side_effect = [fast, slow]
         transport = SolarmanLANTransport("192.168.1.100", 1234567890)
         raw = transport.read_registers()
         self.assertEqual(raw["pv1_v_raw"], 3520)
         self.assertEqual(raw["batt_soc_raw"], 75)
-        self.assertEqual(raw["grid_w_raw"], 64536)
-        self.assertEqual(raw["load_w_raw"], 2476)
+        self.assertEqual(raw["load_l1_w_raw"], 1238)
+        self.assertEqual(raw["load_l2_w_raw"], 1238)
+        self.assertEqual(raw["total_kwh_raw"], 4521)
 
     @patch("solarman_reader._PYSOLARMAN_AVAILABLE", False)
     def test_raises_when_pysolarmanv5_not_installed(self):
@@ -445,6 +468,28 @@ class TestSolarmanLANTransport(unittest.TestCase):
         transport = SolarmanLANTransport("192.168.1.100", 1234567890)
         with self.assertRaises(RuntimeError):
             transport.read_registers()
+
+
+class TestInverterConfigDecode(unittest.TestCase):
+    def test_decode_matches_real_hardware(self):
+        from solarman_reader import _decode_inverter_config
+        ident = [3, 1, 513, 12853, 12593, 12592, 12343, 13111, 16, 0, 0, 0]
+        batt = [0] * 20  # regs 200..219 (index = reg - 200)
+        batt[204 - 200] = 300   # battery rated capacity 300 Ah
+        bms = [0] * 10   # regs 310..319 (index = reg - 310)
+        bms[312 - 310] = 5350   # BMS charge voltage 53.5 V
+        bms[314 - 310] = 50     # BMS charge current limit 50 A
+        bms[315 - 310] = 50     # BMS discharge current limit 50 A
+        bms[316 - 310] = 49     # BMS SOC 49 %
+        bms[317 - 310] = 4933   # battery voltage 49.33 V
+        conf = _decode_inverter_config(ident, batt, bms)
+        self.assertEqual(conf["serial_number"], "2511100737")
+        self.assertEqual(conf["battery_capacity_ah"], 300)
+        self.assertAlmostEqual(conf["bms_charge_voltage_v"], 53.5, places=1)
+        self.assertEqual(conf["bms_charge_current_limit_a"], 50)
+        self.assertEqual(conf["bms_discharge_current_limit_a"], 50)
+        self.assertEqual(conf["bms_soc_pct"], 49)
+        self.assertAlmostEqual(conf["battery_voltage_v"], 49.33, places=2)
 
 
 class TestSolarmanCloudTransport(unittest.TestCase):
@@ -508,7 +553,7 @@ class TestSolarmanCloudTransport(unittest.TestCase):
 
         self.assertEqual(raw["pv1_w_raw"], 3344)
         self.assertEqual(raw["batt_soc_raw"], 75)
-        self.assertEqual(raw["grid_w_raw"], -1000)
+        self.assertEqual(raw["load_l1_w_raw"], 2476)  # LoadPower 2.476 kW
 
 
 class TestDeyeSolarmanReader(unittest.TestCase):
@@ -525,10 +570,10 @@ class TestDeyeSolarmanReader(unittest.TestCase):
     def _make_raw(self):
         return {
             "pv1_v_raw": 3520, "pv1_a_raw": 95, "pv2_v_raw": 3480, "pv2_a_raw": 90,
-            "pv1_w_raw": 3344, "pv2_w_raw": 3132, "temp_raw": 435,
-            "batt_v_raw": 512, "batt_soc_raw": 75, "batt_w_raw": 1200,
-            "grid_w_raw": 64536, "grid_v_raw": 2200, "grid_hz_raw": 6000,
-            "load_w_raw": 2476, "today_kwh_raw": 312, "total_kwh_raw": 4521,
+            "pv1_w_raw": 3344, "pv2_w_raw": 3132, "temp_raw": 1435,
+            "batt_v_raw": 5120, "batt_soc_raw": 75, "batt_w_raw": 1200,
+            "load_l1_w_raw": 1238, "load_l2_w_raw": 1238, "grid_v_raw": 2200,
+            "grid_hz_raw": 6000, "today_kwh_raw": 312, "total_kwh_raw": 4521,
         }
 
     def test_read_all_returns_full_snapshot(self):

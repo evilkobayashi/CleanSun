@@ -29,13 +29,13 @@ _REG_TEMP        = 90    # (value − 1000) × 0.1 °C
 _REG_TODAY_KWH   = 109   # ×0.1 kWh
 _REG_TOTAL_KWH   = 111   # ×0.1 kWh
 _REG_GRID_V      = 150   # ×0.1 V, L1 phase voltage
-_REG_GRID_W      = 169   # ×1 W signed (positive=importing)
-_REG_LOAD_W      = 175   # ×1 W signed-negative (abs for load W)
+_REG_LOAD_L1_W   = 160   # ×1 W signed, total load L1 (house consumption)
+_REG_LOAD_L2_W   = 161   # ×1 W signed, total load L2 (house consumption)
 _REG_BATT_V      = 183   # ×0.01 V
 _REG_BATT_SOC    = 184   # ×1 %
 _REG_PV1_W       = 186   # ×1 W
 _REG_PV2_W       = 187   # ×1 W
-_REG_BATT_W      = 190   # ×1 W signed (positive=charging)
+_REG_BATT_W      = 190   # ×1 W signed (positive=discharging on Deye SUN-7.5K)
 
 
 def _signed16(val: int) -> int:
@@ -49,8 +49,8 @@ def _map_raw_to_snapshot(raw: dict, battery_kwh: float = 9.6) -> dict:
         "pv1_v_raw", "pv1_a_raw", "pv2_v_raw", "pv2_a_raw",
         "pv1_w_raw", "pv2_w_raw", "temp_raw",
         "batt_v_raw", "batt_soc_raw", "batt_w_raw",
-        "grid_w_raw", "grid_v_raw", "grid_hz_raw",
-        "load_w_raw", "today_kwh_raw", "total_kwh_raw",
+        "load_l1_w_raw", "load_l2_w_raw", "grid_v_raw", "grid_hz_raw",
+        "today_kwh_raw", "total_kwh_raw",
     )
     missing = [k for k in _REQUIRED if k not in raw]
     if missing:
@@ -64,24 +64,31 @@ def _map_raw_to_snapshot(raw: dict, battery_kwh: float = 9.6) -> dict:
     temp   = (raw["temp_raw"] - 1000) * 0.1
     batt_v = raw["batt_v_raw"] * 0.01
     batt_soc = raw["batt_soc_raw"]
-    batt_w = _signed16(raw["batt_w_raw"])
-    grid_w = _signed16(raw["grid_w_raw"])
+    batt_w = _signed16(raw["batt_w_raw"])  # positive = discharging (Deye convention)
+    # reg160+reg161 (L1+L2) = total house consumption — confirmed by AC load test
+    # (matched Solarman "consumo" 990W at AC peak). This is the LOAD, not grid.
+    load_w = max(0, _signed16(raw["load_l1_w_raw"]) + _signed16(raw["load_l2_w_raw"]))
     grid_v = raw["grid_v_raw"] * 0.1
     grid_hz = raw["grid_hz_raw"] * 0.01
-    load_w = abs(_signed16(raw["load_w_raw"]))
     today_kwh = raw["today_kwh_raw"] * 0.1
     total_kwh = raw["total_kwh_raw"] * 0.1
 
     dc_kw   = (pv1_w + pv2_w) / 1000.0
     batt_kw = batt_w / 1000.0
 
-    if batt_w > 120:
-        batt_mode = "charging"
-    elif batt_w < -120:
+    # Deye SUN-7.5K: positive batt_w = discharging, negative = charging
+    if batt_w > 30:
         batt_mode = "discharging"
+    elif batt_w < -30:
+        batt_mode = "charging"
     else:
         batt_mode = "idle"
 
+    # Grid exchange from energy balance: what load needs minus PV minus battery.
+    # positive = importing from grid, negative = exporting.
+    batt_discharge_w = max(0, batt_w)
+    batt_charge_w = max(0, -batt_w)
+    grid_w = load_w - (pv1_w + pv2_w) - batt_discharge_w + batt_charge_w
     import_w = max(0, grid_w)
     export_w = max(0, -grid_w)
 
@@ -200,61 +207,165 @@ def _map_raw_to_snapshot(raw: dict, battery_kwh: float = 9.6) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Inverter configuration (static settings) — read on demand, not every poll
+# ---------------------------------------------------------------------------
+
+# Settings/identity registers (holding, FC03). Each field below was confirmed
+# against the Solarman Smart app on the user's Deye SUN-7.5K SG05LP2-US-SM2:
+#   reg3-7   serial "2511100737"
+#   reg204   battery rated capacity 300 Ah
+#   reg312   BMS charge voltage 53.5 V   (x0.01, unique match)
+#   reg314   BMS charge current limit 50 A
+#   reg315   BMS discharge current limit 50 A
+#   reg316   BMS SOC 49 %                 reg317 battery voltage 49.33 V (x0.01)
+_CFG_IDENT_START = 0       # regs 0-11: device type + serial (3-7 ASCII)
+_CFG_BATTERY_START = 200   # regs 200-219: battery settings (capacity reg204)
+_CFG_BMS_START = 310       # regs 310-319: BMS block
+
+
+def _ascii_from_regs(regs) -> str:
+    """Decode Deye ASCII serial: 2 chars per 16-bit reg, high byte first."""
+    out = []
+    for r in regs:
+        out.append(chr((r >> 8) & 0xFF))
+        out.append(chr(r & 0xFF))
+    return "".join(out).strip("\x00 ").strip()
+
+
+def _decode_inverter_config(ident: list, batt: list, bms: list) -> dict:
+    """Decode confirmed static inverter settings into a labeled config dict.
+
+    batt = holding block from reg 200 (index = reg-200);
+    bms  = holding block from reg 310 (index = reg-310).
+    Only fields verified against the Solarman Smart app are returned.
+    """
+    def b(reg):
+        idx = reg - _CFG_BATTERY_START
+        return batt[idx] if 0 <= idx < len(batt) else 0
+
+    def m(reg):
+        idx = reg - _CFG_BMS_START
+        return bms[idx] if 0 <= idx < len(bms) else 0
+
+    serial = _ascii_from_regs(ident[3:8]) if len(ident) >= 8 else ""
+    return {
+        "serial_number": serial,
+        "battery_capacity_ah": b(204),                       # reg204 = 300 Ah
+        "bms_charge_voltage_v": round(m(312) * 0.01, 2),     # reg312 = 53.5 V
+        "bms_charge_current_limit_a": m(314),                # reg314 = 50 A
+        "bms_discharge_current_limit_a": m(315),             # reg315 = 50 A
+        "bms_soc_pct": m(316),                               # reg316 = 49 %
+        "battery_voltage_v": round(m(317) * 0.01, 2),        # reg317 = 49.33 V
+    }
+
+
+# ---------------------------------------------------------------------------
 # LAN Transport
 # ---------------------------------------------------------------------------
 
 class SolarmanLANTransport:
-    """Reads Deye registers from local SOLARMAN datalogger on port 8899."""
+    """Reads Deye registers from local SOLARMAN datalogger on port 8899.
 
-    def __init__(self, ip: str, serial: int, port: int = 8899, mb_slaveid: int = 1):
+    Keeps one persistent Modbus/TCP connection alive across polls and reads
+    registers in two blocks for speed:
+      - FAST block 150-190 (power/load/battery/PV-watts) — read every poll
+      - SLOW block 60-111 (PV V/A, temp, energy counters) — refreshed every
+        ``slow_every`` polls, since these change slowly.
+    This makes acquisition sub-second instead of reopening a TCP+handshake and
+    issuing 6 separate round-trips each poll.
+    """
+
+    def __init__(self, ip: str, serial: int, port: int = 8899, mb_slaveid: int = 1,
+                 slow_every: int = 5):
         self._ip = ip
         self._serial = serial
         self._port = port
         self._mb_slaveid = mb_slaveid
+        self._slow_every = max(1, int(slow_every))
+        self._modbus = None
+        self._slow_cache = {}
+        self._poll_count = 0
+
+    def _client(self):
+        if self._modbus is None:
+            self._modbus = PySolarmanV5(
+                self._ip,
+                self._serial,
+                port=self._port,
+                mb_slaveid=self._mb_slaveid,
+                verbose=False,
+                auto_reconnect=True,
+                socket_timeout=6,
+            )
+        return self._modbus
+
+    def _drop(self):
+        if self._modbus is not None:
+            try:
+                self._modbus.disconnect()
+            except Exception:
+                pass
+            self._modbus = None
+
+    @staticmethod
+    def _extract_slow(b60: list) -> dict:
+        # b60 covers regs 60..111 (index = reg - 60)
+        return {
+            "pv1_v_raw":     b60[0],    # reg60
+            "pv1_a_raw":     b60[1],    # reg61
+            "pv2_v_raw":     b60[2],    # reg62
+            "pv2_a_raw":     b60[3],    # reg63
+            "grid_hz_raw":   b60[19],   # reg79
+            "temp_raw":      b60[30],   # reg90
+            "today_kwh_raw": b60[49],   # reg109
+            "total_kwh_raw": (b60[50] << 16) | b60[51],  # reg110 high + reg111 low
+        }
+
+    @staticmethod
+    def _extract_fast(b150: list) -> dict:
+        # b150 covers regs 150..190 (index = reg - 150)
+        return {
+            "grid_v_raw":    b150[0],    # reg150
+            "load_l1_w_raw": b150[10],   # reg160 = total load L1
+            "load_l2_w_raw": b150[11],   # reg161 = total load L2
+            "batt_v_raw":    b150[33],   # reg183
+            "batt_soc_raw":  b150[34],   # reg184
+            "pv1_w_raw":     b150[36],   # reg186
+            "pv2_w_raw":     b150[37],   # reg187
+            "batt_w_raw":    b150[40],   # reg190
+        }
 
     def read_registers(self) -> dict:
         if not _PYSOLARMAN_AVAILABLE:
             raise RuntimeError("pysolarmanv5 not installed. Run: pip install pysolarmanv5")
-        modbus = PySolarmanV5(
-            self._ip,
-            self._serial,
-            port=self._port,
-            mb_slaveid=self._mb_slaveid,
-            verbose=False,
-            auto_reconnect=True,
-        )
+        modbus = self._client()
         try:
-            b60   = modbus.read_holding_registers(_REG_PV1_V, 4)      # 60-63
-            b79   = modbus.read_holding_registers(_REG_GRID_HZ, 1)    # 79
-            b90   = modbus.read_holding_registers(_REG_TEMP, 1)        # 90
-            b109  = modbus.read_holding_registers(_REG_TODAY_KWH, 3)  # 109-111
-            b150  = modbus.read_holding_registers(_REG_GRID_V, 20)    # 150-169
-            b175  = modbus.read_holding_registers(_REG_LOAD_W, 1)     # 175
-            b183  = modbus.read_holding_registers(_REG_BATT_V, 8)     # 183-190
-        finally:
-            try:
-                modbus.disconnect()
-            except Exception:
-                pass
+            b150 = modbus.read_holding_registers(_REG_GRID_V, 41)  # 150-190 (fast)
+            if not self._slow_cache or self._poll_count % self._slow_every == 0:
+                b60 = modbus.read_holding_registers(_REG_PV1_V, 52)  # 60-111 (slow)
+                self._slow_cache = self._extract_slow(b60)
+            self._poll_count += 1
+        except Exception:
+            self._drop()  # force fresh connect on next poll
+            raise
 
-        return {
-            "pv1_v_raw":     b60[0],
-            "pv1_a_raw":     b60[1],
-            "pv2_v_raw":     b60[2],
-            "pv2_a_raw":     b60[3],
-            "grid_hz_raw":   b79[0],
-            "temp_raw":      b90[0],
-            "today_kwh_raw": b109[0],
-            "total_kwh_raw": b109[2],
-            "grid_v_raw":    b150[0],   # reg150
-            "grid_w_raw":    b150[19],  # reg169 = 150+19
-            "load_w_raw":    b175[0],
-            "batt_v_raw":    b183[0],
-            "batt_soc_raw":  b183[1],
-            "pv1_w_raw":     b183[3],
-            "pv2_w_raw":     b183[4],
-            "batt_w_raw":    b183[7],
-        }
+        out = dict(self._slow_cache)
+        out.update(self._extract_fast(b150))
+        return out
+
+    def read_config_registers(self) -> dict:
+        """Read static identity + settings registers (on demand, not per poll)."""
+        if not _PYSOLARMAN_AVAILABLE:
+            raise RuntimeError("pysolarmanv5 not installed. Run: pip install pysolarmanv5")
+        modbus = self._client()
+        try:
+            ident = modbus.read_holding_registers(_CFG_IDENT_START, 12)   # 0-11
+            batt = modbus.read_holding_registers(_CFG_BATTERY_START, 20)   # 200-219
+            bms = modbus.read_holding_registers(_CFG_BMS_START, 10)        # 310-319
+        except Exception:
+            self._drop()
+            raise
+        return {"ident": ident, "batt": batt, "bms": bms}
 
 
 # ---------------------------------------------------------------------------
@@ -320,7 +431,7 @@ class SolarmanCloudTransport:
             except (ValueError, TypeError):
                 return float(default)
 
-        grid_kw = _f("GridOrMeterActivePower")
+        load_kw = _f("LoadPower")
         batt_kw = _f("BatPower")
 
         return {
@@ -334,10 +445,10 @@ class SolarmanCloudTransport:
             "batt_v_raw":    int(_f("BatVolt") * 100),
             "batt_soc_raw":  int(_f("BatCapcity")),
             "batt_w_raw":    int(batt_kw * 1000),
-            "grid_w_raw":    int(grid_kw * 1000),
+            "load_l1_w_raw": int(load_kw * 1000),  # cloud reports single total; put on L1
+            "load_l2_w_raw": 0,
             "grid_v_raw":    int(_f("GridVolt") * 10),
             "grid_hz_raw":   int(_f("GridFreq") * 100),
-            "load_w_raw":    int(_f("LoadPower") * 1000),
             "today_kwh_raw": int(_f("Eday") * 10),
             "total_kwh_raw": int(_f("Etotal") * 10),
             "_comm_status": "Cloud",
@@ -380,6 +491,7 @@ class DeyeSolarmanReader:
             serial=int(solarman_cfg["datalogger_serial"]),
             port=int(solarman_cfg.get("datalogger_port", 8899)),
             mb_slaveid=int(solarman_cfg.get("mb_slaveid", 1)),
+            slow_every=int(solarman_cfg.get("slow_refresh_every", 5)),
         )
         self._cloud = SolarmanCloudTransport(
             solarman_cfg.get("cloud_fallback", {"enabled": False})
@@ -420,6 +532,19 @@ class DeyeSolarmanReader:
         if len(self._memory_buffer) > self._memory_size:
             self._memory_buffer.pop(0)
         return data
+
+    def read_inverter_config(self) -> dict:
+        """Read + decode static inverter settings (serial, sell, TOU, limits).
+
+        Returns {} when running on the cloud transport (no register access).
+        """
+        if self._using_cloud:
+            return {}
+        raw = self._lan.read_config_registers()
+        cfg = _decode_inverter_config(raw["ident"], raw["batt"], raw["bms"])
+        cfg["model"] = "SUN-7.5K-SG05LP2-US-SM2"
+        cfg["manufacturer"] = "Deye"
+        return cfg
 
     def get_memory_snapshot(self) -> list:
         return list(self._memory_buffer)

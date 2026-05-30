@@ -26,8 +26,8 @@ _REG_PV2_V       = 62    # ×0.1 V
 _REG_PV2_A       = 63    # ×0.1 A
 _REG_GRID_HZ     = 79    # ×0.01 Hz
 _REG_TEMP        = 90    # (value − 1000) × 0.1 °C
-_REG_TODAY_KWH   = 109   # ×0.1 kWh
-_REG_TOTAL_KWH   = 111   # ×0.1 kWh
+_REG_TODAY_KWH   = 108   # ×0.1 kWh, daily generation (resets at midnight)
+_REG_TOTAL_KWH   = 96    # ×0.1 kWh, cumulative generation (reg96 low + reg97 high)
 _REG_GRID_V      = 150   # ×0.1 V, L1 phase voltage
 _REG_LOAD_L1_W   = 160   # ×1 W signed, total load L1 (house consumption)
 _REG_LOAD_L2_W   = 161   # ×1 W signed, total load L2 (house consumption)
@@ -317,8 +317,8 @@ class SolarmanLANTransport:
             "pv2_a_raw":     b60[3],    # reg63
             "grid_hz_raw":   b60[19],   # reg79
             "temp_raw":      b60[30],   # reg90
-            "today_kwh_raw": b60[49],   # reg109
-            "total_kwh_raw": (b60[50] << 16) | b60[51],  # reg110 high + reg111 low
+            "today_kwh_raw": b60[48],   # reg108 = daily generation (resets midnight)
+            "total_kwh_raw": (b60[37] << 16) | b60[36],  # reg97 high + reg96 low = cumulative
         }
 
     @staticmethod

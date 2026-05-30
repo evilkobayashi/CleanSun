@@ -449,9 +449,9 @@ class TestSolarmanLANTransport(unittest.TestCase):
         slow[3] = 90      # reg63 pv2_a
         slow[19] = 6000   # reg79 grid_hz
         slow[30] = 1435   # reg90 temp
-        slow[49] = 312    # reg109 today
-        slow[50] = 0      # reg110 total high
-        slow[51] = 4521   # reg111 total low
+        slow[36] = 4521   # reg96 cumulative gen low word
+        slow[37] = 0      # reg97 cumulative gen high word
+        slow[48] = 312    # reg108 daily generation
         inst = MockPV5.return_value
         inst.read_holding_registers.side_effect = [fast, slow]
         transport = SolarmanLANTransport("192.168.1.100", 1234567890)
@@ -460,6 +460,7 @@ class TestSolarmanLANTransport(unittest.TestCase):
         self.assertEqual(raw["batt_soc_raw"], 75)
         self.assertEqual(raw["load_l1_w_raw"], 1238)
         self.assertEqual(raw["load_l2_w_raw"], 1238)
+        self.assertEqual(raw["today_kwh_raw"], 312)
         self.assertEqual(raw["total_kwh_raw"], 4521)
 
     @patch("solarman_reader._PYSOLARMAN_AVAILABLE", False)

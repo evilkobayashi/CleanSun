@@ -1,4 +1,3 @@
-import React from 'react'
 import { EnergyData, InverterData } from '../types'
 
 interface StatCardProps {

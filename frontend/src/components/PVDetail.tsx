@@ -1,4 +1,3 @@
-import React from 'react'
 import { SolarData } from '../types'
 
 interface PVRowProps {

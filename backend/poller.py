@@ -29,7 +29,7 @@ class Poller:
 
     async def run(self) -> None:
         self._running = True
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         while self._running:
             try:
                 snapshot = await loop.run_in_executor(None, self._reader.read)

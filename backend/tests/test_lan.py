@@ -1,3 +1,4 @@
+import pytest
 from unittest.mock import MagicMock, patch
 from backend.transports.lan import LANTransport
 from backend.models import Snapshot
@@ -66,5 +67,3 @@ def test_lan_drops_client_on_error():
 
         assert transport._client is None
 
-
-import pytest

@@ -1,7 +1,10 @@
 from __future__ import annotations
+import logging
 import time
 import aiosqlite
 from backend.models import Snapshot
+
+logger = logging.getLogger(__name__)
 
 
 class Database:
@@ -52,8 +55,8 @@ class Database:
                 ),
             )
             await self._conn.commit()
-        except Exception:
-            pass  # log + skip on write failure
+        except Exception as exc:
+            logger.warning("DB write error: %s", exc)
 
     async def get_history(self, days: int = 7, bucket: str = "hour") -> list[dict]:
         since = int(time.time()) - days * 86400
@@ -66,7 +69,7 @@ class Database:
 
         query = f"""
             SELECT
-              (ts / {divisor}) * {divisor} AS bucket_ts,
+              (ts / {divisor}) * {divisor} AS ts,
               AVG(solar_w)     AS solar_w,
               AVG(battery_soc) AS battery_soc,
               AVG(battery_kw)  AS battery_kw,
@@ -79,11 +82,9 @@ class Database:
             FROM readings
             WHERE ts >= ?
             GROUP BY ts / {divisor}
-            ORDER BY bucket_ts
+            ORDER BY ts
         """
         async with self._conn.execute(query, (since,)) as cursor:
             rows = await cursor.fetchall()
 
-        keys = ["ts", "solar_w", "battery_soc", "battery_kw", "grid_kw",
-                "load_w", "temp_c", "today_kwh", "total_kwh", "samples"]
-        return [dict(zip(keys, row)) for row in rows]
+        return [dict(row) for row in rows]

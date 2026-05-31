@@ -1,4 +1,6 @@
+import json, tempfile, os
 from backend.models import Snapshot, SolarData, BatteryData, GridData, LoadData, InverterData, EnergyData
+from backend.config import Settings
 
 
 def test_snapshot_defaults():
@@ -32,3 +34,29 @@ def test_snapshot_json_roundtrip():
     assert data["solar"]["total_w"] == 2000
     assert data["battery"]["mode"] == "charging"
     assert data["stale"] is False
+
+
+def test_settings_from_file():
+    cfg_data = {
+        "lan": {
+            "datalogger_ip": "192.168.1.10",
+            "datalogger_serial": 12345678,
+            "port": 8899,
+            "poll_seconds": 5,
+            "fail_threshold": 3,
+            "battery_kwh": 9.6
+        },
+        "cloud": {"enabled": False},
+        "server": {"host": "0.0.0.0", "port": 8080, "db_path": "test.db"}
+    }
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+        json.dump(cfg_data, f)
+        path = f.name
+    try:
+        s = Settings.from_file(path)
+        assert s.lan.datalogger_ip == "192.168.1.10"
+        assert s.lan.datalogger_serial == 12345678
+        assert s.cloud.enabled is False
+        assert s.server.port == 8080
+    finally:
+        os.unlink(path)

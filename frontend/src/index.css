@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gray-950 text-gray-100 antialiased;
+  }
+}
+
+@layer utilities {
+  .flow-line {
+    position: relative;
+    overflow: hidden;
+  }
+  .flow-line::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 0;
+    width: 30%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, currentColor, transparent);
+    animation: flow var(--flow-duration, 1.5s) linear infinite;
+    transform: translateY(-50%);
+  }
+}
